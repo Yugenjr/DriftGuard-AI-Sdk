@@ -86,7 +86,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6 relative font-sans antialiased text-[#e6edf3]">
+    <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 relative font-sans antialiased text-[#ededed]">
       <Head>
         <title>DriftGuard Console Setup</title>
         <meta name="description" content="Set up credentials or login to DriftGuard MLOps observability platform." />
@@ -95,19 +95,19 @@ export default function Login() {
       <div className="max-w-md w-full flex flex-col space-y-6 relative z-10">
         {/* Brand header */}
         <div className="flex flex-col items-center text-center space-y-2">
-          <span className="p-3 bg-gradient-to-tr from-[#58a6ff] to-[#a371f7] rounded-xl shadow-inner text-[#0d1117]">
+          <span className="p-3 bg-gradient-to-tr from-[#24b47e] to-[#10b981] rounded-xl shadow-inner text-[#0d1117]">
             <Layers className="w-6 h-6" />
           </span>
           <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-teal-400 to-[#58a6ff] bg-clip-text text-transparent">
             DRIFTGUARD CONSOLE
           </h1>
-          <p className="text-[10px] text-[#7d8590] uppercase tracking-widest font-semibold">
+          <p className="text-[10px] text-[#a1a1aa] uppercase tracking-widest font-semibold">
             Autonomous Model Health Platform
           </p>
         </div>
 
         {/* Form Card */}
-        <div className="bg-[#1c2128] border border-[#30363d] rounded-lg shadow-2xl overflow-hidden relative min-h-[300px]">
+        <div className="bg-[#18181b] border border-white/10 rounded-xl shadow-xl shadow-black/50 overflow-hidden relative min-h-[300px]">
           {/* Error Banner */}
           {errorMsg ? (
             <div className="bg-[#3d1515] border-b border-[#5a1e1e] px-4 py-3 flex items-start space-x-2 text-xs text-[#f85149] animate-pulse-slow">
@@ -121,17 +121,17 @@ export default function Login() {
             <div className="p-6 space-y-6">
               <div className="text-center space-y-2">
                 <h3 className="text-base font-bold text-[#3fb950]">Credentials Generated!</h3>
-                <p className="text-xs text-[#7d8590] leading-relaxed">
+                <p className="text-xs text-[#a1a1aa] leading-relaxed">
                   Your DriftGuard API Key is displayed below. Copy this key immediately. You will not be able to retrieve it again.
                 </p>
               </div>
 
               {/* Display Key */}
-              <div className="flex items-center justify-between p-3 rounded-lg bg-[#0d1117] border border-[#30363d] font-mono text-xs text-[#e6edf3] break-all select-all relative group">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-[#09090b] border border-white/10 font-mono text-xs text-[#ededed] break-all select-all relative group">
                 <span className="pr-4">{registeredKey}</span>
                 <button
                   onClick={copyToClipboard}
-                  className="p-1.5 rounded-lg border border-[#30363d] bg-[#21262d] hover:bg-[#30363d] hover:text-[#58a6ff] text-[#7d8590] transition-all flex-shrink-0"
+                  className="p-1.5 rounded-xl border border-white/10 bg-[#2e2e2e] hover:bg-[#30363d] hover:text-[#24b47e] text-[#a1a1aa] transition-all flex-shrink-0"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-[#3fb950]" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
@@ -139,7 +139,7 @@ export default function Login() {
 
               <button
                 onClick={() => router.replace('/dashboard')}
-                className="w-full py-2.5 rounded-lg bg-[#58a6ff] hover:bg-[#58a6ff]/80 text-[#0d1117] text-xs font-bold transition-all active:scale-95 flex items-center justify-center space-x-2"
+                className="w-full py-2.5 rounded-xl bg-[#24b47e] hover:bg-[#24b47e]/80 text-[#0d1117] text-xs font-bold transition-all active:scale-95 flex items-center justify-center space-x-2"
               >
                 <span>Go to Dashboard</span>
               </button>
@@ -147,7 +147,7 @@ export default function Login() {
           ) : (
             <>
               {/* Card Tabs */}
-              <div className="flex border-b border-[#30363d] bg-[#161b22]/40">
+              <div className="flex border-b border-white/10 bg-[#09090b]/40">
                 <button
                   onClick={() => {
                     setActiveTab('register');
@@ -155,8 +155,8 @@ export default function Login() {
                   }}
                   className={`flex-1 py-3 text-xs font-semibold tracking-wider uppercase border-b-2 transition-all ${
                     activeTab === 'register'
-                      ? 'border-[#58a6ff] text-[#e6edf3] bg-[#1c2128]/25'
-                      : 'border-transparent text-[#7d8590] hover:text-[#e6edf3]'
+                      ? 'border-[#24b47e] text-[#ededed] bg-[#18181b]/25'
+                      : 'border-transparent text-[#a1a1aa] hover:text-[#ededed]'
                   }`}
                 >
                   Register
@@ -168,8 +168,8 @@ export default function Login() {
                   }}
                   className={`flex-1 py-3 text-xs font-semibold tracking-wider uppercase border-b-2 transition-all ${
                     activeTab === 'signin'
-                      ? 'border-[#58a6ff] text-[#e6edf3] bg-[#1c2128]/25'
-                      : 'border-transparent text-[#7d8590] hover:text-[#e6edf3]'
+                      ? 'border-[#24b47e] text-[#ededed] bg-[#18181b]/25'
+                      : 'border-transparent text-[#a1a1aa] hover:text-[#ededed]'
                   }`}
                 >
                   Sign In
@@ -181,11 +181,11 @@ export default function Login() {
                 {activeTab === 'register' ? (
                   <form onSubmit={handleRegister} className="space-y-4">
                     <div className="space-y-1.5">
-                      <label className="text-[11px] font-semibold text-[#7d8590] uppercase tracking-wider block">
+                      <label className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider block">
                         Full Name
                       </label>
                       <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#7d8590]">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#a1a1aa]">
                           <User className="w-4 h-4" />
                         </span>
                         <input
@@ -194,17 +194,17 @@ export default function Login() {
                           placeholder="e.g. John Doe"
                           value={regName}
                           onChange={(e) => setRegName(e.target.value)}
-                          className="w-full pl-10 pr-4 py-2 rounded-lg bg-[#0d1117] border border-[#30363d] text-xs text-[#e6edf3] placeholder-[#7d8590] focus:outline-none focus:border-[#58a6ff] transition-colors"
+                          className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#09090b] border border-white/10 text-xs text-[#ededed] placeholder-[#7d8590] focus:outline-none focus:border-[#24b47e] transition-colors"
                         />
                       </div>
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[11px] font-semibold text-[#7d8590] uppercase tracking-wider block">
+                      <label className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider block">
                         Email Address
                       </label>
                       <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#7d8590]">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#a1a1aa]">
                           <Mail className="w-4 h-4" />
                         </span>
                         <input
@@ -213,7 +213,7 @@ export default function Login() {
                           placeholder="e.g. name@company.com"
                           value={regEmail}
                           onChange={(e) => setRegEmail(e.target.value)}
-                          className="w-full pl-10 pr-4 py-2 rounded-lg bg-[#0d1117] border border-[#30363d] text-xs text-[#e6edf3] placeholder-[#7d8590] focus:outline-none focus:border-[#58a6ff] transition-colors"
+                          className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#09090b] border border-white/10 text-xs text-[#ededed] placeholder-[#7d8590] focus:outline-none focus:border-[#24b47e] transition-colors"
                         />
                       </div>
                     </div>
@@ -221,7 +221,7 @@ export default function Login() {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-2.5 rounded-lg bg-[#58a6ff] hover:bg-[#58a6ff]/80 text-[#0d1117] text-xs font-bold transition-all disabled:opacity-50 active:scale-95 mt-2 flex items-center justify-center cursor-pointer"
+                      className="w-full py-2.5 rounded-xl bg-[#24b47e] hover:bg-[#24b47e]/80 text-[#0d1117] text-xs font-bold transition-all disabled:opacity-50 active:scale-95 mt-2 flex items-center justify-center cursor-pointer"
                     >
                       {loading ? (
                         <div className="w-4 h-4 border-2 border-[#0d1117] border-t-transparent rounded-full animate-spin"></div>
@@ -233,11 +233,11 @@ export default function Login() {
                 ) : (
                   <form onSubmit={handleSignIn} className="space-y-4">
                     <div className="space-y-1.5">
-                      <label className="text-[11px] font-semibold text-[#7d8590] uppercase tracking-wider block">
+                      <label className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider block">
                         DriftGuard API Key
                       </label>
                       <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#7d8590]">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#a1a1aa]">
                           <Key className="w-4 h-4" />
                         </span>
                         <input
@@ -246,12 +246,12 @@ export default function Login() {
                           placeholder="dg-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                           value={apiKeyInput}
                           onChange={(e) => setApiKeyInput(e.target.value)}
-                          className="w-full pl-10 pr-10 py-2 rounded-lg bg-[#0d1117] border border-[#30363d] text-xs text-[#e6edf3] placeholder-[#7d8590] focus:outline-none focus:border-[#58a6ff] transition-colors"
+                          className="w-full pl-10 pr-10 py-2 rounded-xl bg-[#09090b] border border-white/10 text-xs text-[#ededed] placeholder-[#7d8590] focus:outline-none focus:border-[#24b47e] transition-colors"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#7d8590] hover:text-[#e6edf3] cursor-pointer"
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#a1a1aa] hover:text-[#ededed] cursor-pointer"
                         >
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
@@ -261,7 +261,7 @@ export default function Login() {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-2.5 rounded-lg bg-[#58a6ff] hover:bg-[#58a6ff]/80 text-[#0d1117] text-xs font-bold transition-all disabled:opacity-50 active:scale-95 mt-2 flex items-center justify-center cursor-pointer"
+                      className="w-full py-2.5 rounded-xl bg-[#24b47e] hover:bg-[#24b47e]/80 text-[#0d1117] text-xs font-bold transition-all disabled:opacity-50 active:scale-95 mt-2 flex items-center justify-center cursor-pointer"
                     >
                       {loading ? (
                         <div className="w-4 h-4 border-2 border-[#0d1117] border-t-transparent rounded-full animate-spin"></div>

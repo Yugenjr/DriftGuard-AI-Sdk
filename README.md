@@ -1,11 +1,83 @@
-## Repository Notice
+<div align="center">
+  <h1>🛡️ DriftGuard AI</h1>
+  <p><strong>Self-Healing MLOps & Autonomous Retraining Platform</strong></p>
+  
+  [![PyPI version](https://badge.fury.io/py/driftguard-ai-sdk.svg)](https://badge.fury.io/py/driftguard-ai-sdk)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+</div>
 
-This repository is no longer actively maintained.
+<br />
 
-The project has been moved to the following repository:
+DriftGuard is a production-grade observability platform that detects **data drift**, **concept drift**, and **model degradation** in real-time, automatically triggering CI/CD retraining loops (like Apache Airflow) to heal your AI pipelines with zero human intervention.
 
-**https://github.com/Yugenjr/DriftGuard-AI-Sdk**
+## 🌟 Features
 
-For the latest updates, documentation, development history, and project details, please refer to the new repository.
+- **Real-Time Telemetry:** Asynchronous, non-blocking telemetry logging that adds zero latency to your inference APIs.
+- **Enterprise Dashboard:** A stunning, Vercel-inspired observability dashboard to monitor your entire fleet of models in real-time.
+- **Self-Healing Webhooks:** Automatically fire POST payloads to your orchestrator (Airflow, Kubeflow, SageMaker) when SLA thresholds are breached.
+- **Multi-Tenant Security:** Securely isolate telemetry data by project using hashed API keys.
 
-For any questions regarding the project, contributions, or maintenance, please contact **Yugenjr** through GitHub.
+---
+
+## 🚀 Quickstart: Bring Your Own Server
+
+You can run the entire DriftGuard platform on your own infrastructure for free using Docker.
+
+### 1. Start the Platform
+Clone this repository and spin up the backend and frontend simultaneously:
+```bash
+git clone https://github.com/Yugenjr/DriftGuard-AI-Sdk.git
+cd DriftGuard-AI-Sdk/infra
+docker-compose up -d
+```
+Your dashboard is now live at **http://localhost:3000**! Go create your first API key.
+
+### 2. Install the SDK
+Install the lightweight Python SDK into your inference environment:
+```bash
+pip install driftguard-ai-sdk
+```
+
+### 3. Wrap your Model
+Import the SDK and initialize it in your FastAPI/Flask app:
+
+```python
+from fastapi import FastAPI
+from driftguard import DriftGuard
+
+# 1. Initialize DriftGuard
+dg = DriftGuard(
+    model_id="fraud-detector-v1",
+    api_key="dg-your-secret-key",
+    drift_threshold=0.15,
+    expected_features=["amount", "location_score", "velocity"]
+)
+
+app = FastAPI()
+
+@app.post("/predict")
+def predict(features: list[float]):
+    prediction = model.predict([features])
+    
+    # 2. Log telemetry asynchronously (Non-blocking)
+    dg.log_prediction(
+        features=features,
+        prediction=prediction
+    )
+    
+    return {"fraud_probability": prediction}
+```
+
+---
+
+## 🏗 Architecture
+DriftGuard is composed of three main components:
+1. **The Python SDK (`driftguard/`)**: A lightweight client that intercepts inferences and streams telemetry.
+2. **The FastAPI Engine (`main.py`)**: A high-concurrency event processor backed by PostgreSQL for state management.
+3. **The Obsidian Dashboard (`dashboard/`)**: A Next.js (React) front-end providing a breathtaking developer experience.
+
+## 🤝 Contributing
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on how to set up your local development environment.
+
+## 📄 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

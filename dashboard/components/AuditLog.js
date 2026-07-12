@@ -8,7 +8,7 @@ export default function AuditLog({ logs }) {
 
   if (!logs || logs.length === 0) {
     return (
-      <div className="bg-[#1c2128] border border-[#30363d] p-5 rounded-lg text-center text-[#7d8590] text-sm">
+      <div className="bg-[#18181b] border border-white/10 p-5 rounded-xl text-center text-[#a1a1aa] text-sm">
         No audit events recorded yet
       </div>
     );
@@ -19,13 +19,13 @@ export default function AuditLog({ logs }) {
       case 'drift_detected':
         return 'text-[#d29922] bg-[#3d2f00] border border-[#554000]/40';
       case 'retrain_triggered':
-        return 'text-[#58a6ff] bg-[#1c2d3a] border border-[#243e56]/40';
+        return 'text-[#24b47e] bg-[#1c2d3a] border border-[#243e56]/40';
       case 'model_promoted':
         return 'text-[#3fb950] bg-[#1a4731] border border-[#1f5a3a]/40';
       case 'rollback':
         return 'text-[#f85149] bg-[#3d1515] border border-[#5a1e1e]/40';
       default:
-        return 'text-[#e6edf3] bg-[#21262d] border border-[#30363d]';
+        return 'text-[#ededed] bg-[#2e2e2e] border border-white/10';
     }
   };
 
@@ -56,12 +56,12 @@ export default function AuditLog({ logs }) {
   const currentLogs = filteredLogs.slice(startIndex, startIndex + pageSize);
 
   return (
-    <div className="bg-[#1c2128] border border-[#30363d] p-5 rounded-lg shadow-md flex flex-col space-y-4">
+    <div className="bg-[#18181b] border border-white/10 p-5 rounded-xl shadow-md flex flex-col space-y-4">
       {/* Search Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <h3 className="text-sm font-bold text-[#e6edf3]">Audit Trail & Ledger</h3>
+        <h3 className="text-sm font-bold text-[#ededed]">Audit Trail & Ledger</h3>
         <div className="relative w-full md:w-72">
-          <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#7d8590]">
+          <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#a1a1aa]">
             <Search className="w-3.5 h-3.5" />
           </span>
           <input
@@ -72,16 +72,16 @@ export default function AuditLog({ logs }) {
               setSearch(e.target.value);
               setCurrentPage(1);
             }}
-            className="w-full pl-9 pr-4 py-1.5 rounded-lg bg-[#0d1117] border border-[#30363d] text-xs text-[#e6edf3] placeholder-[#7d8590] focus:outline-none focus:border-[#58a6ff] transition-colors"
+            className="w-full pl-9 pr-4 py-1.5 rounded-xl bg-[#09090b] border border-white/10 text-xs text-[#ededed] placeholder-[#7d8590] focus:outline-none focus:border-[#24b47e] transition-colors"
           />
         </div>
       </div>
 
       {/* Table grid */}
-      <div className="overflow-x-auto border border-[#30363d]/50 rounded-lg">
+      <div className="overflow-x-auto border border-white/10/50 rounded-xl">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-[#161b22] border-b border-[#30363d] text-[10px] text-[#7d8590] uppercase tracking-wider font-semibold">
+            <tr className="bg-[#09090b] border-b border-white/10 text-[10px] text-[#a1a1aa] uppercase tracking-wider font-semibold">
               <th className="px-4 py-3">Timestamp</th>
               <th className="px-4 py-3">Event Type</th>
               <th className="px-4 py-3">Model Version</th>
@@ -92,14 +92,14 @@ export default function AuditLog({ logs }) {
           <tbody className="divide-y divide-[#30363d]/30 text-xs">
             {currentLogs.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-[#7d8590]">
+                <td colSpan={5} className="px-4 py-8 text-center text-[#a1a1aa]">
                   No matching audit logs located
                 </td>
               </tr>
             ) : (
               currentLogs.map((log, index) => (
-                <tr key={index} className="hover:bg-[#21262d]/20 transition-colors">
-                  <td className="px-4 py-3 text-[#7d8590] font-mono">
+                <tr key={index} className="hover:bg-[#2e2e2e]/20 transition-colors">
+                  <td className="px-4 py-3 text-[#a1a1aa] font-mono">
                     {formatDate(log.timestamp)}
                   </td>
                   <td className="px-4 py-3">
@@ -107,13 +107,13 @@ export default function AuditLog({ logs }) {
                       {formatEventType(log.event_type)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[#e6edf3] font-semibold">
+                  <td className="px-4 py-3 text-[#ededed] font-semibold">
                     {log.model_version !== null && log.model_version !== undefined ? `v${log.model_version}` : 'N/A'}
                   </td>
-                  <td className="px-4 py-3 text-[#e6edf3] font-mono font-medium">
+                  <td className="px-4 py-3 text-[#ededed] font-mono font-medium">
                     {formatDriftScore(log.drift_score)}
                   </td>
-                  <td className="px-4 py-3 text-[#7d8590] uppercase font-bold text-[9px] tracking-wider">
+                  <td className="px-4 py-3 text-[#a1a1aa] uppercase font-bold text-[9px] tracking-wider">
                     {log.triggered_by || 'auto'}
                   </td>
                 </tr>
@@ -126,24 +126,24 @@ export default function AuditLog({ logs }) {
       {/* Pagination controls */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between pt-2">
-          <span className="text-[10px] text-[#7d8590]">
+          <span className="text-[10px] text-[#a1a1aa]">
             Showing {startIndex + 1} to {Math.min(startIndex + pageSize, totalItems)} of {totalItems} logs
           </span>
           <div className="flex space-x-1.5">
             <button
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               disabled={activePage === 1}
-              className="p-1.5 rounded-lg border border-[#30363d] bg-[#21262d]/50 hover:bg-[#21262d] text-[#e6edf3] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              className="p-1.5 rounded-xl border border-white/10 bg-[#2e2e2e]/50 hover:bg-[#2e2e2e] text-[#ededed] disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
-            <span className="px-3 py-1.5 text-xs text-[#e6edf3] bg-[#21262d] border border-[#30363d] rounded-lg font-bold">
+            <span className="px-3 py-1.5 text-xs text-[#ededed] bg-[#2e2e2e] border border-white/10 rounded-xl font-bold">
               {activePage} / {totalPages}
             </span>
             <button
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={activePage === totalPages}
-              className="p-1.5 rounded-lg border border-[#30363d] bg-[#21262d]/50 hover:bg-[#21262d] text-[#e6edf3] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              className="p-1.5 rounded-xl border border-white/10 bg-[#2e2e2e]/50 hover:bg-[#2e2e2e] text-[#ededed] disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
               <ChevronRight className="w-3.5 h-3.5" />
             </button>

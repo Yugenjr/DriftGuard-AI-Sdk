@@ -22,7 +22,7 @@ export default function Layout({ children, onRefresh, lastUpdated, isRefreshing,
   }, [children]);
 
   return (
-    <div className="flex bg-[#0d1117] min-h-screen text-[#e6edf3] font-sans antialiased overflow-hidden">
+    <div className="flex bg-[#09090b] min-h-screen text-[#ededed] font-sans antialiased overflow-hidden">
       {/* Sidebar */}
       <Sidebar activeModelCount={activeCount} />
 
@@ -32,11 +32,11 @@ export default function Layout({ children, onRefresh, lastUpdated, isRefreshing,
         <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto relative">
           {/* Connection Error Banner */}
           {error ? (
-            <div className="bg-[#3d1515] border border-[#5a1e1e] p-4 rounded-lg flex items-start space-x-3 text-xs text-[#f85149] animate-pulse-slow mb-6">
+            <div className="bg-[#3d1515] border border-[#5a1e1e] p-4 rounded-xl flex items-start space-x-3 text-xs text-[#f85149] animate-pulse-slow mb-6">
               <ShieldAlert className="w-5 h-5 flex-shrink-0" />
               <div className="space-y-0.5">
                 <span className="font-bold">Connection Error:</span>
-                <p className="text-[#7d8590]">{error}</p>
+                <p className="text-[#a1a1aa]">{error}</p>
               </div>
             </div>
           ) : null}

@@ -8,7 +8,7 @@ export default function RetrainingHistory({ events }) {
 
   if (!events || events.length === 0) {
     return (
-      <div className="bg-[#1c2128] border border-[#30363d] p-5 rounded-lg text-center text-[#7d8590] text-sm">
+      <div className="bg-[#18181b] border border-white/10 p-5 rounded-xl text-center text-[#a1a1aa] text-sm">
         No retraining events recorded yet
       </div>
     );
@@ -23,7 +23,7 @@ export default function RetrainingHistory({ events }) {
       case 'completed':
         return 'bg-[#3fb950] ring-[#1a4731]';
       case 'running':
-        return 'bg-[#58a6ff] ring-[#1c2d3a] animate-pulse';
+        return 'bg-[#24b47e] ring-[#1c2d3a] animate-pulse';
       case 'failed':
         return 'bg-[#f85149] ring-[#3d1515]';
       default:
@@ -49,15 +49,15 @@ export default function RetrainingHistory({ events }) {
     const isNeutral = diff === 0;
 
     return (
-      <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-[#e6edf3] bg-[#0d1117] px-2 py-1 rounded border border-[#30363d] mt-2 w-fit">
+      <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-[#ededed] bg-[#09090b] px-2 py-1 rounded border border-white/10 mt-2 w-fit">
         <span>{event.old_version !== null && event.old_version !== undefined ? `v${event.old_version}` : 'N/A'}</span>
-        <ArrowRight className="w-3 h-3 text-[#7d8590]" />
+        <ArrowRight className="w-3 h-3 text-[#a1a1aa]" />
         <span>{event.new_version !== null && event.new_version !== undefined ? `v${event.new_version}` : 'N/A'}</span>
-        <span className="text-[#7d8590]">|</span>
+        <span className="text-[#a1a1aa]">|</span>
         <span>Acc: {formatPercent(oldAcc)}</span>
-        <ArrowRight className="w-3 h-3 text-[#7d8590]" />
+        <ArrowRight className="w-3 h-3 text-[#a1a1aa]" />
         <span>{formatPercent(newAcc)}</span>
-        <span className={`font-bold ${isImproved ? 'text-[#3fb950]' : isNeutral ? 'text-[#7d8590]' : 'text-[#f85149]'}`}>
+        <span className={`font-bold ${isImproved ? 'text-[#3fb950]' : isNeutral ? 'text-[#a1a1aa]' : 'text-[#f85149]'}`}>
           {isImproved ? `+${percentChange}%` : `${percentChange}%`}
         </span>
       </div>
@@ -65,11 +65,11 @@ export default function RetrainingHistory({ events }) {
   };
 
   return (
-    <div className="bg-[#1c2128] border border-[#30363d] p-5 rounded-lg shadow-md flex flex-col space-y-4">
-      <h3 className="text-sm font-bold text-[#e6edf3]">Retraining Events Timeline</h3>
+    <div className="bg-[#18181b] border border-white/10 p-5 rounded-xl shadow-md flex flex-col space-y-4">
+      <h3 className="text-sm font-bold text-[#ededed]">Retraining Events Timeline</h3>
 
       {/* Vertical Timeline */}
-      <div className="relative pl-6 border-l border-[#30363d] space-y-6">
+      <div className="relative pl-6 border-l border-white/10 space-y-6">
         {displayedEvents.map((ev, idx) => (
           <div key={ev.id || idx} className="relative group">
             {/* Circle Dot marker */}
@@ -80,19 +80,19 @@ export default function RetrainingHistory({ events }) {
               <div className="flex items-center space-x-2.5">
                 <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
                   ev.triggered_by === 'manual'
-                    ? 'bg-[#1c2d3a] text-[#58a6ff] border border-[#243e56]/40'
-                    : 'bg-[#21262d] text-[#e6edf3] border border-[#30363d]'
+                    ? 'bg-[#1c2d3a] text-[#24b47e] border border-[#243e56]/40'
+                    : 'bg-[#2e2e2e] text-[#ededed] border border-white/10'
                 }`}>
                   {ev.triggered_by || 'auto'}
                 </span>
-                <span className="text-[10px] text-[#7d8590] font-mono">
+                <span className="text-[10px] text-[#a1a1aa] font-mono">
                   {formatDate(ev.start_time)}
                 </span>
                 <span className="ml-auto">
                   <StatusBadge status={ev.status} />
                 </span>
               </div>
-              <p className="text-xs text-[#e6edf3] font-medium leading-relaxed">
+              <p className="text-xs text-[#ededed] font-medium leading-relaxed">
                 {ev.status === 'completed'
                   ? 'Challenger promoted! Retraining pipeline completed successfully.'
                   : ev.status === 'running'
@@ -109,7 +109,7 @@ export default function RetrainingHistory({ events }) {
       {hasMore && (
         <button
           onClick={() => setShowAll(!showAll)}
-          className="w-full flex items-center justify-center space-x-1.5 py-2 rounded-lg bg-[#21262d] border border-[#30363d] hover:bg-[#30363d] text-xs font-semibold text-[#58a6ff] transition-all cursor-pointer mt-4"
+          className="w-full flex items-center justify-center space-x-1.5 py-2 rounded-xl bg-[#2e2e2e] border border-white/10 hover:bg-[#30363d] text-xs font-semibold text-[#24b47e] transition-all cursor-pointer mt-4"
         >
           {showAll ? (
             <>
