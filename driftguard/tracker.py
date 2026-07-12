@@ -14,6 +14,12 @@ import atexit
 
 from driftguard.config import settings
 from driftguard.drift_detector import ADWINDriftDetector
+import json
+
+try:
+    from confluent_kafka import Producer
+except ImportError:
+    Producer = None
 
 logger = logging.getLogger("DriftGuard.SDK")
 
@@ -106,6 +112,16 @@ class DriftGuard:
         # Defer starting the worker thread to wrap() after explicit registration
         atexit.register(self._shutdown_telemetry_worker)
 
+        # Kafka Telemetry Setup
+        self._kafka_producer = None
+        kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+        if kafka_brokers and Producer is not None:
+            try:
+                self._kafka_producer = Producer({'bootstrap.servers': kafka_brokers})
+                logger.info(f"[{self.model_id}] Kafka Producer initialized targeting {kafka_brokers}")
+            except Exception as e:
+                logger.warning(f"[{self.model_id}] Failed to initialize Kafka Producer: {e}")
+
         logger.info(f"Initialized DriftGuard SDK for model '{model_id}' against API: {self.api_url}")
 
     def _register_model(self, feature_names: List[str]):
@@ -134,12 +150,13 @@ class DriftGuard:
         except Exception as e:
             logger.warning(f"[{self.model_id}] Failed to explicitly register model: {e}")
 
-    def wrap(self, model: Any) -> "DriftGuardModelWrapper":
+    def wrap(self, model: Any, feature_extractor: Optional[Callable] = None) -> "DriftGuardModelWrapper":
         """
         Wrap any machine learning model to automatically track its inputs and outputs.
 
         Args:
             model: An arbitrary model instance (scikit-learn, PyTorch, HuggingFace, etc.)
+            feature_extractor: Optional callback to convert inputs (text, images, categoricals) to numerical arrays for drift detection.
 
         Returns:
             A DriftGuardModelWrapper interceptor.
@@ -164,7 +181,7 @@ class DriftGuard:
                 pass
 
         # 4. Return wrapped model
-        return DriftGuardModelWrapper(model, self)
+        return DriftGuardModelWrapper(model, self, feature_extractor)
 
     # ------------------------------------------------------------------
     # Callback registration API
@@ -273,10 +290,23 @@ class DriftGuard:
             logger.warning(f"[{self.model_id}] Telemetry tracker has been shut down. Rejecting new payload.")
             return
         payload = {
+            "model_id": self.model_id,
+            "api_key": self.api_key,
             "features": features,
             "prediction": prediction,
             "drift_score": drift_score
         }
+        
+        if self._kafka_producer:
+            try:
+                self._kafka_producer.produce('driftguard-telemetry', value=json.dumps(payload).encode('utf-8'))
+                self._kafka_producer.poll(0)
+                self.telemetry_sent += 1
+                return
+            except Exception as e:
+                logger.error(f"[{self.model_id}] Kafka produce failed: {e}. Falling back to HTTP queue.")
+                self.telemetry_failed += 1
+
         self.telemetry_queued += 1
         try:
             self._telemetry_queue.put_nowait(payload)
@@ -360,7 +390,6 @@ class DriftGuard:
         # Signal stop event
         self._telemetry_stop_event.set()
         
-        # Wait for worker thread to finish (it will process the remaining queue items before stopping)
         if self._telemetry_worker.is_alive():
             logger.info(f"[{self.model_id}] Flushing telemetry queue ({self._telemetry_queue.qsize()} items) and waiting for worker thread...")
             self._telemetry_worker.join(timeout=timeout)
@@ -369,6 +398,10 @@ class DriftGuard:
             else:
                 logger.info(f"[{self.model_id}] Telemetry worker stopped successfully.")
                 
+        if self._kafka_producer:
+            self._kafka_producer.flush(timeout=timeout)
+            logger.info(f"[{self.model_id}] Kafka Producer flushed successfully.")
+
         logger.info(f"[{self.model_id}] Graceful shutdown complete. Queued: {self.telemetry_queued}, Sent: {self.telemetry_sent}, Failed: {self.telemetry_failed}")
 
     def _shutdown_telemetry_worker(self):
@@ -462,9 +495,10 @@ class DriftGuardModelWrapper:
     """
     Model interceptor wrapping target models and forwarding calls while computing drift metrics.
     """
-    def __init__(self, model: Any, tracker: DriftGuard):
+    def __init__(self, model: Any, tracker: DriftGuard, feature_extractor: Optional[Callable] = None):
         self._model = model
         self._tracker = tracker
+        self._feature_extractor = feature_extractor
 
     def predict(self, features: Any, *args, **kwargs) -> Any:
         """
@@ -512,15 +546,26 @@ class DriftGuardModelWrapper:
         Tracks prediction request details, runs ADWIN checks and notifies platform.
         """
         try:
+            # 0. Apply user-provided feature extractor if available (for Images, NLP, Categoricals)
+            if self._feature_extractor is not None:
+                trackable_features = self._feature_extractor(features)
+            else:
+                trackable_features = features
+
             # 1. Standardize features to float array/list
-            feat_arr = self._to_numpy_array(features)
-            pred_arr = self._to_numpy_array(prediction)
+            feat_arr = self._to_numpy_array(trackable_features)
 
             # If flat 1D, make it 2D (batch of 1)
             if feat_arr.ndim == 1:
                 feat_arr = feat_arr.reshape(1, -1)
-            if pred_arr.ndim == 0 or pred_arr.ndim == 1:
-                pred_arr = pred_arr.reshape(1, -1)
+                
+            try:
+                pred_arr = self._to_numpy_array(prediction)
+                if pred_arr.ndim == 0 or pred_arr.ndim == 1:
+                    pred_arr = pred_arr.reshape(1, -1)
+                pred_list = pred_arr[0].tolist()
+            except ValueError:
+                pred_list = prediction if isinstance(prediction, list) else [prediction]
 
             # Extract dimensions
             num_samples, num_features = feat_arr.shape
@@ -553,7 +598,7 @@ class DriftGuardModelWrapper:
             # 3. Upload telemetry asynchronously
             self._tracker._send_telemetry_async(
                 features=feat_arr[0].tolist(),
-                prediction=pred_arr[0].tolist(),
+                prediction=pred_list,
                 drift_score=drift_score
             )
 
@@ -575,11 +620,6 @@ class DriftGuardModelWrapper:
         """
         Safely convert standard containers (lists, numpy, pandas, PyTorch) to a numpy array.
         """
-        # Handle string or dictionary text classifications
-        if isinstance(data, (str, dict)):
-            # Mock hash array or vector length of 1 for string payloads (e.g. HuggingFace)
-            return np.array([hash(str(data)) % 1000 / 1000.0], dtype=np.float32)
-            
         # Handle HuggingFace pipeline response lists
         if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
             # Extract scores or labels from e.g. [{"label": "POSITIVE", "score": 0.99}]
@@ -600,9 +640,8 @@ class DriftGuardModelWrapper:
         # Convert to numpy array safely
         try:
             return np.asarray(data, dtype=np.float32)
-        except Exception:
-            # Fallback for complex structure string mappings
-            return np.array([0.0], dtype=np.float32)
+        except Exception as e:
+            raise ValueError(f"Could not convert data to numpy array for drift tracking. If using unstructured data (Text/Images), please provide a feature_extractor callback to dg.wrap(). Error: {e}")
 
     def __getattr__(self, name):
         """

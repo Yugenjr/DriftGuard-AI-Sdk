@@ -127,7 +127,8 @@ class RetrainerCallbackRunner:
 
             # Step 5 — Update local champion reference so next comparison is correct
             self.tracker._champion_model = challenger_model
-            print("CHAMPION UPDATED")
+            self.tracker.drift_detector = None  # Reset drift baseline!
+            print("CHAMPION AND DRIFT BASELINE UPDATED")
 
             logger.info(
                 f"[{self.model_id}] Challenger promoted: "

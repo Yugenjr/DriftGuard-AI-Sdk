@@ -359,8 +359,8 @@ class ExplicitRegisterModelRequest(BaseModel):
     features: List[str] = Field(default_factory=list, example=["feature_1", "feature_2"])
 
 class PredictTelemetryRequest(BaseModel):
-    features: List[float] = Field(..., example=[1.2, 0.4, 9.8])
-    prediction: List[float] = Field(..., example=[1.0])
+    features: List[Any] = Field(..., example=[1.2, 0.4, 9.8])
+    prediction: List[Any] = Field(..., example=[1.0])
     drift_score: float = Field(..., example=0.08)
 
 class RetrainTriggerRequest(BaseModel):
@@ -698,6 +698,26 @@ def register_model_explicit(req: ExplicitRegisterModelRequest, current_user: DBU
 
     return {"status": "registered", "model_id": req.model_id}
 
+@app.delete("/models/{model_id}", summary="Delete a model and all its historical telemetry, versions, and events")
+def delete_model(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    model = verify_model_access(db, current_user, model_id)
+    
+    try:
+        # Cascade delete related entries manually since relationships don't enforce it
+        db.query(DBPredictionLog).filter(DBPredictionLog.model_id == model_id).delete(synchronize_session=False)
+        db.query(DBRetrainingEvent).filter(DBRetrainingEvent.model_id == model_id).delete(synchronize_session=False)
+        db.query(DBAuditLogEntry).filter(DBAuditLogEntry.model_id == model_id).delete(synchronize_session=False)
+        db.query(DBModelVersion).filter(DBModelVersion.model_id == model_id).delete(synchronize_session=False)
+        
+        # Delete the model itself
+        db.delete(model)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete model: {e}")
+        
+    return {"status": "deleted", "model_id": model_id}
+
 @app.post("/predict/{model_id}", summary="Log model telemetry and execute ADWIN tracking")
 def log_prediction(model_id: str, req: PredictTelemetryRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
     """
@@ -932,7 +952,8 @@ def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DB
     db.commit()
     
     # Update metrics
-    accuracy_gauge.labels(model_id=model_id, version=target_ver.version).set(target_ver.accuracy)
+    if target_ver.accuracy is not None:
+        accuracy_gauge.labels(model_id=model_id, version=target_ver.version).set(target_ver.accuracy)
     
     send_alert(
         event_type="rollback",
@@ -941,8 +962,8 @@ def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DB
             "model_id": model_id,
             "old_version": old_version,
             "new_version": target_ver.version,
-            "old_accuracy": f"{old_accuracy:.4f}",
-            "new_accuracy": f"{target_ver.accuracy:.4f}",
+            "old_accuracy": f"{old_accuracy:.4f}" if old_accuracy is not None else "N/A",
+            "new_accuracy": f"{target_ver.accuracy:.4f}" if target_ver.accuracy is not None else "N/A",
             "action": "reverted_to_champion"
         }
     )
@@ -1164,6 +1185,7 @@ def complete_retraining(model_id: str, req: RetrainCompleteRequest, current_user
             event.status = "completed"
             event.end_time = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
             event.new_accuracy = req.new_accuracy
+            event.old_accuracy = req.old_accuracy if req.old_accuracy is not None else event.old_accuracy
             event.new_version = req.new_version
             event.details_json = json.dumps(
                 {"message": "Promoted by SDK callback pipeline.",
@@ -1223,6 +1245,8 @@ def complete_retraining(model_id: str, req: RetrainCompleteRequest, current_user
         if event:
             event.status = "failed"
             event.end_time = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
+            event.new_accuracy = req.new_accuracy
+            event.old_accuracy = req.old_accuracy if req.old_accuracy is not None else event.old_accuracy
             event.details_json = json.dumps(
                 {"error": req.error or "Challenger did not pass validation.",
                  "source": "sdk_callback"}
@@ -1424,6 +1448,9 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 event.new_version = new_ver
                 event.details_json = json.dumps(pipeline_results.get("details", {}))
             
+            _old_acc = event.old_accuracy if event else model.accuracy
+            _old_acc_str = f"{_old_acc:.4f}" if _old_acc is not None else "N/A"
+            
             # Write Promotion Audit Log
             audit_prom = DBAuditLogEntry(
                 project_id=model.project_id,
@@ -1433,8 +1460,8 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 drift_score=0.0,
                 triggered_by="automatic" if triggered_by == "automatic" else "manual",
                 details_json=json.dumps({
-                    "message": f"Challenger model {new_ver} promoted to champion. Succeeded accuracy validation check ({new_acc:.4f} > {event.old_accuracy:.4f}).",
-                    "before_accuracy": event.old_accuracy if event else model.accuracy,
+                    "message": f"Challenger model {new_ver} promoted to champion. Succeeded accuracy validation check ({new_acc:.4f} > {_old_acc_str}).",
+                    "before_accuracy": _old_acc,
                     "after_accuracy": new_acc
                 })
             )
@@ -1452,7 +1479,7 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                     "model_id": model_id,
                     "old_version": event.old_version if event else model.version,
                     "new_version": new_ver,
-                    "old_accuracy": f"{event.old_accuracy:.4f}" if event else f"{model.accuracy:.4f}",
+                    "old_accuracy": _old_acc_str,
                     "new_accuracy": f"{new_acc:.4f}"
                 }
             )
@@ -1524,3 +1551,66 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
             pass
     finally:
         db.close()
+
+# ----------------------------------------------------
+# KAFKA CONSUMER BACKGROUND WORKER
+# ----------------------------------------------------
+def kafka_consumer_loop():
+    import json
+    import httpx
+    try:
+        from confluent_kafka import Consumer
+    except ImportError:
+        print("[Kafka] confluent-kafka not installed. Consumer disabled.")
+        return
+
+    kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+    if not kafka_brokers:
+        print("[Kafka] KAFKA_BOOTSTRAP_SERVERS not set. Consumer disabled.")
+        return
+
+    conf = {
+        'bootstrap.servers': kafka_brokers,
+        'group.id': 'driftguard-backend-group',
+        'auto.offset.reset': 'earliest'
+    }
+    
+    try:
+        consumer = Consumer(conf)
+        consumer.subscribe(['driftguard-telemetry'])
+        print(f"[Kafka] Consumer started on {kafka_brokers}, listening to 'driftguard-telemetry'")
+        
+        client = httpx.Client(timeout=10.0)
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"[Kafka] Consumer error: {msg.error()}")
+                continue
+            
+            # Process Message
+            try:
+                payload = json.loads(msg.value().decode('utf-8'))
+                model_id = payload.pop("model_id", None)
+                api_key = payload.pop("api_key", None)
+                
+                if not model_id:
+                    continue
+                
+                # Forward to standard endpoint to reuse all complex logic
+                headers = {"X-API-Key": api_key} if api_key else {}
+                # Post internally to FastAPI
+                client.post(f"http://127.0.0.1:8000/predict/{model_id}", json=payload, headers=headers)
+                
+            except Exception as e:
+                print(f"[Kafka] Error processing message: {e}")
+                
+    except Exception as e:
+        print(f"[Kafka] Failed to start consumer: {e}")
+
+@app.on_event("startup")
+def startup_event():
+    import threading
+    worker = threading.Thread(target=kafka_consumer_loop, daemon=True, name="KafkaConsumerWorker")
+    worker.start()

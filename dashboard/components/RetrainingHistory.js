@@ -94,10 +94,10 @@ export default function RetrainingHistory({ events }) {
               </div>
               <p className="text-xs text-[#e6edf3] font-medium leading-relaxed">
                 {ev.status === 'completed'
-                  ? 'Retraining pipeline completed successfully.'
+                  ? 'Challenger promoted! Retraining pipeline completed successfully.'
                   : ev.status === 'running'
                   ? 'Retraining flow is currently executing steps...'
-                  : ev.details?.message || ev.error || 'Retraining event failed during execution.'}
+                  : ev.details?.message || ev.error || 'Challenger rejected! Retraining event failed during execution.'}
               </p>
               {renderAccuracyChange(ev)}
             </div>
