@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { ArrowRight, Activity, DatabaseZap, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 
 export function Hero() {
   return (
@@ -29,13 +30,13 @@ export function Hero() {
             <span className="bg-foreground text-background px-3 py-1 border-2 border-foreground">NLP / Vision / Tabular</span>
             <span className="bg-primary text-foreground px-3 py-1 border-2 border-foreground brutal-shadow-sm transform -rotate-2">Works With ANY Model</span>
           </div>
-          <div className="flex flex-col sm:flex-row gap-4 font-sans font-black uppercase tracking-wider">
-            <button className="bg-primary text-foreground px-8 py-4 border-4 border-foreground brutal-button flex items-center justify-center gap-2 text-xl">
+          <div className="flex flex-col sm:flex-row gap-4 font-sans font-black uppercase tracking-wider mt-4">
+            <Link href="/login" className="bg-primary text-foreground px-8 py-4 border-4 border-foreground brutal-button flex items-center justify-center gap-2 text-xl">
               Start Monitoring <ArrowRight className="w-6 h-6" strokeWidth={3} />
-            </button>
-            <button className="bg-background text-foreground px-8 py-4 border-4 border-foreground brutal-button flex items-center justify-center gap-2 text-xl hover:bg-surface">
+            </Link>
+            <Link href="#features" className="bg-background text-foreground px-8 py-4 border-4 border-foreground brutal-button flex items-center justify-center gap-2 text-xl hover:bg-surface">
               Watch Demo
-            </button>
+            </Link>
           </div>
         </motion.div>
 

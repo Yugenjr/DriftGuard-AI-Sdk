@@ -25,9 +25,9 @@ export default function Sidebar({ activeModelCount }) {
   };
 
   const navItems = [
-    { label: 'Fleet Overview', icon: LayoutDashboard, path: '/dashboard' },
-    { label: 'Model Metrics', icon: Activity, path: '/dashboard', badge: activeModelCount },
-    { label: 'System Settings', icon: Settings, path: '/dashboard' }
+    { label: 'Fleet Overview', icon: LayoutDashboard, path: '/dashboard', isActive: (p) => p === '/dashboard' },
+    { label: 'Model Metrics', icon: Activity, path: '#', badge: activeModelCount, isActive: (p) => p.startsWith('/models/') },
+    { label: 'System Settings', icon: Settings, path: '#', isActive: (p) => p.startsWith('/settings') }
   ];
 
   const getInitials = (name) => {
@@ -51,11 +51,11 @@ export default function Sidebar({ activeModelCount }) {
         <nav className="mt-6 px-3 space-y-1">
           {navItems.map((item, idx) => {
             const Icon = item.icon;
-            const isActive = router.pathname === item.path || (router.pathname.startsWith('/models/') && item.label === 'Model Metrics');
+            const isActive = item.isActive(router.pathname);
             return (
               <button
                 key={idx}
-                onClick={() => router.push(item.path)}
+                onClick={() => item.path !== '#' && router.push(item.path)}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold tracking-wide transition-all group ${
                   isActive
                     ? 'bg-[#1c2128] text-[#58a6ff] border border-[#30363d]'
