@@ -698,6 +698,26 @@ def register_model_explicit(req: ExplicitRegisterModelRequest, current_user: DBU
 
     return {"status": "registered", "model_id": req.model_id}
 
+@app.delete("/models/{model_id}", summary="Delete a model and all its historical telemetry, versions, and events")
+def delete_model(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    model = verify_model_access(db, current_user, model_id)
+    
+    try:
+        # Cascade delete related entries manually since relationships don't enforce it
+        db.query(DBPredictionLog).filter(DBPredictionLog.model_id == model_id).delete(synchronize_session=False)
+        db.query(DBRetrainingEvent).filter(DBRetrainingEvent.model_id == model_id).delete(synchronize_session=False)
+        db.query(DBAuditLogEntry).filter(DBAuditLogEntry.model_id == model_id).delete(synchronize_session=False)
+        db.query(DBModelVersion).filter(DBModelVersion.model_id == model_id).delete(synchronize_session=False)
+        
+        # Delete the model itself
+        db.delete(model)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete model: {e}")
+        
+    return {"status": "deleted", "model_id": model_id}
+
 @app.post("/predict/{model_id}", summary="Log model telemetry and execute ADWIN tracking")
 def log_prediction(model_id: str, req: PredictTelemetryRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
     """
@@ -1531,3 +1551,66 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
             pass
     finally:
         db.close()
+
+# ----------------------------------------------------
+# KAFKA CONSUMER BACKGROUND WORKER
+# ----------------------------------------------------
+def kafka_consumer_loop():
+    import json
+    import httpx
+    try:
+        from confluent_kafka import Consumer
+    except ImportError:
+        print("[Kafka] confluent-kafka not installed. Consumer disabled.")
+        return
+
+    kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+    if not kafka_brokers:
+        print("[Kafka] KAFKA_BOOTSTRAP_SERVERS not set. Consumer disabled.")
+        return
+
+    conf = {
+        'bootstrap.servers': kafka_brokers,
+        'group.id': 'driftguard-backend-group',
+        'auto.offset.reset': 'earliest'
+    }
+    
+    try:
+        consumer = Consumer(conf)
+        consumer.subscribe(['driftguard-telemetry'])
+        print(f"[Kafka] Consumer started on {kafka_brokers}, listening to 'driftguard-telemetry'")
+        
+        client = httpx.Client(timeout=10.0)
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"[Kafka] Consumer error: {msg.error()}")
+                continue
+            
+            # Process Message
+            try:
+                payload = json.loads(msg.value().decode('utf-8'))
+                model_id = payload.pop("model_id", None)
+                api_key = payload.pop("api_key", None)
+                
+                if not model_id:
+                    continue
+                
+                # Forward to standard endpoint to reuse all complex logic
+                headers = {"X-API-Key": api_key} if api_key else {}
+                # Post internally to FastAPI
+                client.post(f"http://127.0.0.1:8000/predict/{model_id}", json=payload, headers=headers)
+                
+            except Exception as e:
+                print(f"[Kafka] Error processing message: {e}")
+                
+    except Exception as e:
+        print(f"[Kafka] Failed to start consumer: {e}")
+
+@app.on_event("startup")
+def startup_event():
+    import threading
+    worker = threading.Thread(target=kafka_consumer_loop, daemon=True, name="KafkaConsumerWorker")
+    worker.start()

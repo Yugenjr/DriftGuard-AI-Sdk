@@ -14,6 +14,12 @@ import atexit
 
 from driftguard.config import settings
 from driftguard.drift_detector import ADWINDriftDetector
+import json
+
+try:
+    from confluent_kafka import Producer
+except ImportError:
+    Producer = None
 
 logger = logging.getLogger("DriftGuard.SDK")
 
@@ -105,6 +111,16 @@ class DriftGuard:
         )
         # Defer starting the worker thread to wrap() after explicit registration
         atexit.register(self._shutdown_telemetry_worker)
+
+        # Kafka Telemetry Setup
+        self._kafka_producer = None
+        kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+        if kafka_brokers and Producer is not None:
+            try:
+                self._kafka_producer = Producer({'bootstrap.servers': kafka_brokers})
+                logger.info(f"[{self.model_id}] Kafka Producer initialized targeting {kafka_brokers}")
+            except Exception as e:
+                logger.warning(f"[{self.model_id}] Failed to initialize Kafka Producer: {e}")
 
         logger.info(f"Initialized DriftGuard SDK for model '{model_id}' against API: {self.api_url}")
 
@@ -274,10 +290,23 @@ class DriftGuard:
             logger.warning(f"[{self.model_id}] Telemetry tracker has been shut down. Rejecting new payload.")
             return
         payload = {
+            "model_id": self.model_id,
+            "api_key": self.api_key,
             "features": features,
             "prediction": prediction,
             "drift_score": drift_score
         }
+        
+        if self._kafka_producer:
+            try:
+                self._kafka_producer.produce('driftguard-telemetry', value=json.dumps(payload).encode('utf-8'))
+                self._kafka_producer.poll(0)
+                self.telemetry_sent += 1
+                return
+            except Exception as e:
+                logger.error(f"[{self.model_id}] Kafka produce failed: {e}. Falling back to HTTP queue.")
+                self.telemetry_failed += 1
+
         self.telemetry_queued += 1
         try:
             self._telemetry_queue.put_nowait(payload)
@@ -361,7 +390,6 @@ class DriftGuard:
         # Signal stop event
         self._telemetry_stop_event.set()
         
-        # Wait for worker thread to finish (it will process the remaining queue items before stopping)
         if self._telemetry_worker.is_alive():
             logger.info(f"[{self.model_id}] Flushing telemetry queue ({self._telemetry_queue.qsize()} items) and waiting for worker thread...")
             self._telemetry_worker.join(timeout=timeout)
@@ -370,6 +398,10 @@ class DriftGuard:
             else:
                 logger.info(f"[{self.model_id}] Telemetry worker stopped successfully.")
                 
+        if self._kafka_producer:
+            self._kafka_producer.flush(timeout=timeout)
+            logger.info(f"[{self.model_id}] Kafka Producer flushed successfully.")
+
         logger.info(f"[{self.model_id}] Graceful shutdown complete. Queued: {self.telemetry_queued}, Sent: {self.telemetry_sent}, Failed: {self.telemetry_failed}")
 
     def _shutdown_telemetry_worker(self):
