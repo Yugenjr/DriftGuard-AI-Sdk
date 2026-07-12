@@ -71,6 +71,56 @@ def predict(features: list[float]):
 ---
 
 ## 🏗 Architecture
+
+```text
+                     +---------------------------------------+
+                     |          Client Application           |
+                     +-------------------+-------------------+
+                                         |
+                                (Predict Telemetry)
+                                         v
+                     +-------------------+-------------------+
+                     |          DriftGuard SDK               |
+                     |  - Wrapper pattern intercept          |
+                     |  - River ADWIN concept drift checks   |
+                     +-------------------+-------------------+
+                                         |
+                                 (HTTP Telemetry)
+                                         v
+                     +-------------------+-------------------+
+                     |       DriftGuard FastAPI Core API     | <---+ NextJS Dashboard (:3000)
+                     |       - /register, /predict, /drift   | <---+ Grafana (:3001)
+                     |       - Prom metrics /metrics (:8000) |
+                     +-------------------+-------------------+
+                                         |
+                        (SLA Drift Breach Trigger)
+                                         v
+                     +-------------------+-------------------+
+                     |      Prefect Orchestration Server     |
+                     |      - drift_detection_flow (:4200)   |
+                     +-------------------+-------------------+
+                                         |
+                                 (Runs steps)
+                                         v
+                     +-------------------+-------------------+
+                     |      ZenML Step Training Pipelines    |
+                     |  - Step 1: Great Expectations Validate|
+                     |  - Step 2: Feast Feature Store Check  |
+                     |  - Step 3: Train & Track (MLflow/W&B) |
+                     |  - Step 4: Validate (>1% boost check) |
+                     |  - Step 5: Canary Progressive Deploy  |
+                     |  - Step 6: Immutable JSON Ledger & PDF|
+                     +-------------------+-------------------+
+                                         |
+                            (Progressive Split Promotes)
+                                         v
+                     +-------------------+-------------------+
+                     |       BentoML & Ray Serve Fleet       |
+                     |       - canary_router: 10%->100%      |
+                     |       - SLA Monitoring & Rollbacks    |
+                     +---------------------------------------+
+```
+
 DriftGuard is composed of three main components:
 1. **The Python SDK (`driftguard/`)**: A lightweight client that intercepts inferences and streams telemetry.
 2. **The FastAPI Engine (`main.py`)**: A high-concurrency event processor backed by PostgreSQL for state management.
