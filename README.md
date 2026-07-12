@@ -24,11 +24,11 @@ DriftGuard is a production-grade observability platform that detects **data drif
 You can run the entire DriftGuard platform on your own infrastructure for free using Docker.
 
 ### 1. Start the Platform
-Clone this repository and spin up the backend and frontend simultaneously:
+Clone this repository and spin up the backend and frontend simultaneously using our highly optimized, pre-built Docker Hub images:
 ```bash
 git clone https://github.com/Yugenjr/DriftGuard-AI-Sdk.git
 cd DriftGuard-AI-Sdk/infra
-docker-compose up -d
+docker-compose -f docker-compose.prod.yml up -d
 ```
 Your dashboard is now live at **http://localhost:3000**! Go create your first API key.
 
