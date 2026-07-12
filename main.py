@@ -359,8 +359,8 @@ class ExplicitRegisterModelRequest(BaseModel):
     features: List[str] = Field(default_factory=list, example=["feature_1", "feature_2"])
 
 class PredictTelemetryRequest(BaseModel):
-    features: List[float] = Field(..., example=[1.2, 0.4, 9.8])
-    prediction: List[float] = Field(..., example=[1.0])
+    features: List[Any] = Field(..., example=[1.2, 0.4, 9.8])
+    prediction: List[Any] = Field(..., example=[1.0])
     drift_score: float = Field(..., example=0.08)
 
 class RetrainTriggerRequest(BaseModel):
@@ -932,7 +932,8 @@ def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DB
     db.commit()
     
     # Update metrics
-    accuracy_gauge.labels(model_id=model_id, version=target_ver.version).set(target_ver.accuracy)
+    if target_ver.accuracy is not None:
+        accuracy_gauge.labels(model_id=model_id, version=target_ver.version).set(target_ver.accuracy)
     
     send_alert(
         event_type="rollback",
@@ -941,8 +942,8 @@ def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DB
             "model_id": model_id,
             "old_version": old_version,
             "new_version": target_ver.version,
-            "old_accuracy": f"{old_accuracy:.4f}",
-            "new_accuracy": f"{target_ver.accuracy:.4f}",
+            "old_accuracy": f"{old_accuracy:.4f}" if old_accuracy is not None else "N/A",
+            "new_accuracy": f"{target_ver.accuracy:.4f}" if target_ver.accuracy is not None else "N/A",
             "action": "reverted_to_champion"
         }
     )
@@ -1164,6 +1165,7 @@ def complete_retraining(model_id: str, req: RetrainCompleteRequest, current_user
             event.status = "completed"
             event.end_time = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
             event.new_accuracy = req.new_accuracy
+            event.old_accuracy = req.old_accuracy if req.old_accuracy is not None else event.old_accuracy
             event.new_version = req.new_version
             event.details_json = json.dumps(
                 {"message": "Promoted by SDK callback pipeline.",
@@ -1223,6 +1225,8 @@ def complete_retraining(model_id: str, req: RetrainCompleteRequest, current_user
         if event:
             event.status = "failed"
             event.end_time = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
+            event.new_accuracy = req.new_accuracy
+            event.old_accuracy = req.old_accuracy if req.old_accuracy is not None else event.old_accuracy
             event.details_json = json.dumps(
                 {"error": req.error or "Challenger did not pass validation.",
                  "source": "sdk_callback"}
@@ -1424,6 +1428,9 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 event.new_version = new_ver
                 event.details_json = json.dumps(pipeline_results.get("details", {}))
             
+            _old_acc = event.old_accuracy if event else model.accuracy
+            _old_acc_str = f"{_old_acc:.4f}" if _old_acc is not None else "N/A"
+            
             # Write Promotion Audit Log
             audit_prom = DBAuditLogEntry(
                 project_id=model.project_id,
@@ -1433,8 +1440,8 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 drift_score=0.0,
                 triggered_by="automatic" if triggered_by == "automatic" else "manual",
                 details_json=json.dumps({
-                    "message": f"Challenger model {new_ver} promoted to champion. Succeeded accuracy validation check ({new_acc:.4f} > {event.old_accuracy:.4f}).",
-                    "before_accuracy": event.old_accuracy if event else model.accuracy,
+                    "message": f"Challenger model {new_ver} promoted to champion. Succeeded accuracy validation check ({new_acc:.4f} > {_old_acc_str}).",
+                    "before_accuracy": _old_acc,
                     "after_accuracy": new_acc
                 })
             )
@@ -1452,7 +1459,7 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                     "model_id": model_id,
                     "old_version": event.old_version if event else model.version,
                     "new_version": new_ver,
-                    "old_accuracy": f"{event.old_accuracy:.4f}" if event else f"{model.accuracy:.4f}",
+                    "old_accuracy": _old_acc_str,
                     "new_accuracy": f"{new_acc:.4f}"
                 }
             )
