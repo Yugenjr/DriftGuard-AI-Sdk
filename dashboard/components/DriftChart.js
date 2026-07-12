@@ -14,7 +14,7 @@ import { formatDriftScore } from '../lib/utils';
 export default function DriftChart({ data, threshold }) {
   if (!data || data.length === 0) {
     return (
-      <div className="bg-[#1c2128] border border-[#30363d] h-[350px] rounded-lg flex items-center justify-center text-[#7d8590] text-sm">
+      <div className="bg-[#18181b] border border-white/10 h-[350px] rounded-xl flex items-center justify-center text-[#a1a1aa] text-sm">
         No predictions recorded yet
       </div>
     );
@@ -39,9 +39,9 @@ export default function DriftChart({ data, threshold }) {
       const dateStr = new Date(item.timestamp).toLocaleString();
       return (
         <div className="drift-chart-tooltip">
-          <p className="text-[10px] text-[#7d8590] font-semibold uppercase tracking-wider mb-1">Telemetry Record</p>
-          <p className="font-semibold text-xs text-[#e6edf3] mb-1">Time: {dateStr}</p>
-          <p className="font-semibold text-xs text-[#58a6ff]">Drift Score: {formatDriftScore(item.drift_score)}</p>
+          <p className="text-[10px] text-[#a1a1aa] font-semibold uppercase tracking-wider mb-1">Telemetry Record</p>
+          <p className="font-semibold text-xs text-[#ededed] mb-1">Time: {dateStr}</p>
+          <p className="font-semibold text-xs text-[#24b47e]">Drift Score: {formatDriftScore(item.drift_score)}</p>
         </div>
       );
     }
@@ -49,10 +49,10 @@ export default function DriftChart({ data, threshold }) {
   };
 
   return (
-    <div className="bg-[#1c2128] border border-[#30363d] p-5 rounded-lg shadow-md space-y-4">
+    <div className="bg-[#18181b] border border-white/10 p-5 rounded-xl shadow-md space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-[#e6edf3]">Drift Score — Last 100 Predictions</h3>
-        <span className="text-[11px] font-semibold text-[#7d8590] bg-[#21262d] border border-[#30363d] px-2 py-0.5 rounded">
+        <h3 className="text-sm font-bold text-[#ededed]">Drift Score — Last 100 Predictions</h3>
+        <span className="text-[11px] font-semibold text-[#a1a1aa] bg-[#2e2e2e] border border-white/10 px-2 py-0.5 rounded">
           Active Limit: {threshold}
         </span>
       </div>

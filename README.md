@@ -1,12 +1,78 @@
-#  DriftGuard — Autonomous Model Health Platform
+<div align="center">
+  <h1>🛡️ DriftGuard AI</h1>
+  <p><strong>Self-Healing MLOps & Autonomous Retraining Platform</strong></p>
+  
+  [![PyPI version](https://badge.fury.io/py/driftguard-ai-sdk.svg)](https://badge.fury.io/py/driftguard-ai-sdk)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+</div>
 
-DriftGuard is a production-grade, self-healing MLOps platform designed to detect data drift, concept drift, and model degradation in real time, automatically trigger validating retraining pipelines, and progressively deploy champion models via progressive canary routers.
+<br />
+
+DriftGuard is a production-grade observability platform that detects **data drift**, **concept drift**, and **model degradation** in real-time, automatically triggering CI/CD retraining loops (like Apache Airflow) to heal your AI pipelines with zero human intervention.
+
+## 🌟 Features
+
+- **Real-Time Telemetry:** Asynchronous, non-blocking telemetry logging that adds zero latency to your inference APIs.
+- **Enterprise Dashboard:** A stunning, Vercel-inspired observability dashboard to monitor your entire fleet of models in real-time.
+- **Self-Healing Webhooks:** Automatically fire POST payloads to your orchestrator (Airflow, Kubeflow, SageMaker) when SLA thresholds are breached.
+- **Multi-Tenant Security:** Securely isolate telemetry data by project using hashed API keys.
 
 ---
 
-##  Architecture Design
+## 🚀 Quickstart: Bring Your Own Server
 
+You can run the entire DriftGuard platform on your own infrastructure for free using Docker.
+
+### 1. Start the Platform
+Clone this repository and spin up the backend and frontend simultaneously using our highly optimized, pre-built Docker Hub images:
+```bash
+git clone https://github.com/Yugenjr/DriftGuard-AI-Sdk.git
+cd DriftGuard-AI-Sdk/infra
+docker-compose -f docker-compose.prod.yml up -d
 ```
+Your dashboard is now live at **http://localhost:3000**! Go create your first API key.
+
+### 2. Install the SDK
+Install the lightweight Python SDK into your inference environment:
+```bash
+pip install driftguard-ai-sdk
+```
+
+### 3. Wrap your Model
+Import the SDK and initialize it in your FastAPI/Flask app:
+
+```python
+from fastapi import FastAPI
+from driftguard import DriftGuard
+
+# 1. Initialize DriftGuard
+dg = DriftGuard(
+    model_id="fraud-detector-v1",
+    api_key="dg-your-secret-key",
+    drift_threshold=0.15,
+    expected_features=["amount", "location_score", "velocity"]
+)
+
+app = FastAPI()
+
+@app.post("/predict")
+def predict(features: list[float]):
+    prediction = model.predict([features])
+    
+    # 2. Log telemetry asynchronously (Non-blocking)
+    dg.log_prediction(
+        features=features,
+        prediction=prediction
+    )
+    
+    return {"fraud_probability": prediction}
+```
+
+---
+
+## 🏗 Architecture
+
+```text
                      +---------------------------------------+
                      |          Client Application           |
                      +-------------------+-------------------+
@@ -55,143 +121,13 @@ DriftGuard is a production-grade, self-healing MLOps platform designed to detect
                      +---------------------------------------+
 ```
 
----
+DriftGuard is composed of three main components:
+1. **The Python SDK (`driftguard/`)**: A lightweight client that intercepts inferences and streams telemetry.
+2. **The FastAPI Engine (`main.py`)**: A high-concurrency event processor backed by PostgreSQL for state management.
+3. **The Obsidian Dashboard (`dashboard/`)**: A Next.js (React) front-end providing a breathtaking developer experience.
 
-##  Prerequisites
+## 🤝 Contributing
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on how to set up your local development environment.
 
-To run and configure DriftGuard, ensure the following are installed:
-- **Python 3.11** only (Ray and BentoML have incomplete 3.12 support).
-- **Docker & Docker Compose** (for multi-service orchestration).
-- **kubectl & Helm** (optional, for Kubernetes deployments).
-- **HashiCorp Terraform** (optional, for AWS cloud provisioning).
-
----
-
-## Quick Start in 5 Lines
-
-Wrap any scikit-learn, PyTorch, or HuggingFace model with DriftGuard SDK to track predictions, compute concept drift, and initiate auto-healing:
-
-```python
-from driftguard import DriftGuard
-
-# 1. Initialize DriftGuard
-dg = DriftGuard(model_id="fraud-detector-v1", api_url="http://localhost:8000", drift_threshold=0.15, auto_retrain=True)
-
-# 2. Wrap model seamlessly
-model = dg.wrap(trained_sklearn_model)
-
-# 3. Predict normally - DriftGuard tracks inputs, outputs, and triggers retrain on drift!
-prediction = model.predict(features)
-```
-
----
-
-##  Installation & Setup
-
-### 1. Local Package Installation
-Clone the repository and install the DriftGuard package locally:
-```bash
-git clone https://github.com/your-repo/DriftGuard.git
-cd DriftGuard
-pip install -e .
-```
-
-To install validation pipelines dependencies (Great Expectations + SQLAlchemy 1.4 pin) separately:
-```bash
-pip install -e ".[validation]"
-```
-
-### 2. Launch Platform Services
-Spin up the entire 8-service DriftGuard stack (FastAPI, NextJS dashboard, MLflow, Prefect, Postgres, Redis, Prometheus, Grafana) instantly:
-```bash
-docker-compose -f infra/docker-compose.yml up --build -d
-```
-
----
-
-## ⚙️ SDK Configuration Parameters
-
-The `DriftGuard` class accepts the following parameters:
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `model_id` | `str` | *Required* | Unique name identifier of the model. |
-| `api_url` | `str` | `http://localhost:8000` | Gateway endpoint of the DriftGuard API. |
-| `drift_threshold` | `float` | `0.15` | Limit before concept drift alert and retraining triggers. |
-| `auto_retrain` | `bool` | `True` | Automatically triggers retraining flow on threshold breach. |
-
----
-
-## 📡 API Gateway Documentation
-
-DriftGuard Core API runs on port `8000`. Key REST endpoints include:
-
-### `POST /register`
-Registers a model for monitoring.
-- **Request Body:**
-  ```json
-  {
-    "model_id": "fraud-detector-v1",
-    "drift_threshold": 0.15,
-    "reference_data_path": "./data/baseline.parquet",
-    "features": ["amount", "location_score", "velocity"]
-  }
-  ```
-- **Response:** `{"status": "registered", "model_id": "fraud-detector-v1"}`
-
-### `POST /predict/{model_id}`
-SDK telemetry gateway recording prediction details and updating gauges.
-- **Request Body:**
-  ```json
-  {
-    "features": [1.2, 0.4, 9.8],
-    "prediction": [1.0],
-    "drift_score": 0.08
-  }
-  ```
-
-### `GET /drift/{model_id}`
-Fetches the last 100 historical drift scores for Recharts charts rendering.
-
-### `POST /retrain/{model_id}`
-Manually triggers the background retraining pipeline flow.
-
-### `GET /metrics`
-Exposes system health gauges for Prometheus scrapers in OpenMetrics format.
-
----
-
-##  Dashboards & Observability Portals
-
-Once the docker services are online:
-1. **NextJS UI Dashboard:** Navigate to [http://localhost:3000](http://localhost:3000) to review models list, drift histories, vertical retraining timelines, and searchable audit logs.
-2. **MLflow Registry:** Access [http://localhost:5000](http://localhost:5000) to review runs parameters, artifacts (confusion matrix plots), and staging/production champions.
-3. **Prefect Dashboard:** Access [http://localhost:4200](http://localhost:4200) to inspect flows execution history.
-4. **Grafana Dashboards:** Open [http://localhost:3001](http://localhost:3001) (User: `admin` | Pass: `admin`) to view pre-provisioned telemetry panels scraping predictions, drift rates, accuracy levels, and quantiles latency.
-
----
-
-##  Running Unit Tests
-
-Run all unit tests verifying ADWIN concept detectors, Great Expectations validators, canary routing splits, emergency rollbacks, and cryptographic audit log chains:
-```bash
-pytest tests/ -v
-```
-
----
-
-##  Deploying to AWS Cloud (Terraform)
-
-Deploy DriftGuard core infrastructure to Amazon Web Services:
-```bash
-cd infra/terraform
-terraform init
-terraform plan
-terraform apply -var="db_password=SecurePasswordPass22!"
-```
-This provisions:
-- Amazon EKS cluster for progressive Kubernetes canary Rollouts.
-- Amazon RDS PostgreSQL database for MLflow, Prefect, and platform metadata.
-- Amazon ElastiCache Redis for online real-time Feast features access.
-- Amazon S3 bucket for artifacts.
-- Amazon ECR for Docker images.
+## 📄 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

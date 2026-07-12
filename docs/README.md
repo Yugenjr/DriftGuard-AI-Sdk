@@ -10,52 +10,21 @@ DriftGuard provides real-time model logging, telemetry streaming, statistical co
 
 Explore the platform's features, architecture, and use cases through these detailed guides:
 
-1. [**Main Portal (README.md)**](README.md): Current file. Overview, directory structures, and quickstart guide.
-2. [**System Architecture & Security (architecture.md)**](architecture.md): Detailed system components, multi-tenant security partitioning, and database entity relationships.
-3. [**SDK & Telemetry Queue (sdk_telemetry.md)**](sdk_telemetry.md): Deep-dive into model wrapping, asynchronous queuing buffers, worker threads, and connection pool resilience.
-4. [**Concept Drift Detection (drift_detection.md)**](drift_detection.md): Mathematical walkthrough of ADWIN, Welford online variance, and global drift metric scoring.
-5. [**Retraining & Rollback Lifecycles (retraining_rollback.md)**](retraining_rollback.md): Threading models for automated callbacks, validation scorer requirements, and emergency recovery checks.
-6. [**Application Use-Cases (usecases.md)**](usecases.md): Real-world scenarios (Credit Fraud Retraining, Multi-Tenant SaaS, and Emergency rollbacks) with sequence diagrams and JSON payloads.
+### 🚀 Getting Started (Start Here)
+If you are new to DriftGuard, follow this journey to get your first self-healing model running in under 10 minutes.
+1. [**01. Installation Guide**](getting_started/01_installation.md): Deploying the Docker Hub images and installing the PyPI SDK.
+2. [**02. Quickstart Tutorial**](getting_started/02_quickstart.md): Writing your first lines of code to wrap a FastAPI model.
+3. [**03. Running & Checking**](getting_started/03_running_and_checking.md): Simulating drift locally and watching the dashboard spike.
 
----
+### ⚙️ Core Concepts (The Engine)
+Deep dives into the math and architecture powering the platform.
+1. [**The Interceptor Lifecycle**](core_concepts/the_interceptor.md): Step-by-step lifecycle of a single prediction payload.
+2. [**System Architecture & Security**](core_concepts/architecture.md): Detailed system components, multi-tenant security partitioning, and database entity relationships.
+3. [**SDK & Telemetry Queue**](core_concepts/sdk_telemetry.md): Deep-dive into model wrapping, asynchronous queuing buffers, and worker threads.
+4. [**Concept Drift Detection**](core_concepts/drift_detection.md): Mathematical walkthrough of the ADWIN algorithm and variance scoring.
 
-## Quickstart Guide: Running DriftGuard
-
-### 1. Install Project Dependencies
-Navigate to the root directory and install requirements:
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Launch the Core API Gateway
-Start the FastAPI server using Uvicorn:
-```bash
-python -m uvicorn main:app --host 127.0.0.1 --port 8000
-```
-
-### 3. Basic SDK Initialization
-```python
-import numpy as np
-from sklearn.linear_model import LogisticRegression
-from driftguard.tracker import DriftGuard
-
-# Train a classifier
-X_train = np.random.rand(100, 3)
-y_train = np.random.randint(0, 2, 100)
-clf = LogisticRegression().fit(X_train, y_train)
-
-# Setup SDK Client
-dg = DriftGuard(
-    model_id="scoring-model",
-    api_url="http://127.0.0.1:8000",
-    api_key="dg-your-key-here",
-    project_id=1,
-    drift_threshold=0.50
-)
-dg.set_champion(clf)
-dg.set_validation_data(X_train, y_train)
-
-# Wrap to predict
-wrapped = dg.wrap(clf)
-preds = wrapped.predict(np.random.rand(1, 3))
-```
+### 📈 Advanced Workflows
+For production MLOps engineers deploying automated CI/CD loops.
+1. [**Retraining & Rollback Lifecycles**](advanced/retraining_rollback.md): Webhooks, Apache Airflow integration, and Champion/Challenger validation.
+2. [**Application Use-Cases**](advanced/usecases.md): Real-world scenarios like Credit Fraud detection and SaaS multi-tenancy.
+3. [**Full System Workflow Dump**](advanced/FULL_SYSTEM_WORKFLOW.md): Comprehensive, unedited workflow logs and internal architecture dumps.

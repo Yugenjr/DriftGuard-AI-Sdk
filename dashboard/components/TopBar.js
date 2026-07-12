@@ -35,32 +35,36 @@ export default function TopBar({ onRefresh, lastUpdated, isRefreshing }) {
   };
 
   return (
-    <header className="h-[56px] border-b border-[#30363d] bg-[#161b22]/70 backdrop-blur-md sticky top-0 z-40 px-6 flex items-center justify-between">
+    <header className="h-14 border-b border-white/10 bg-[#09090b]/80 backdrop-blur-md sticky top-0 z-40 px-6 flex items-center justify-between">
       {/* Left: Breadcrumbs Page Title */}
-      <div className="flex items-center space-x-2">
-        <span className="text-xs text-[#7d8590] font-semibold tracking-wider uppercase">Console</span>
-        <span className="text-xs text-[#7d8590] font-semibold">/</span>
-        <h2 className="text-xs font-bold text-[#e6edf3] uppercase tracking-wider">{getPageTitle()}</h2>
+      <div className="flex items-center space-x-2 text-[13px]">
+        <span className="text-[#a1a1aa] font-medium tracking-tight">Console</span>
+        <span className="text-[#3f3f46]">/</span>
+        <h2 className="font-semibold text-[#ededed] tracking-tight">{getPageTitle()}</h2>
       </div>
 
       {/* Right: Sync Status and User Profile */}
-      <div className="flex items-center space-x-4">
+      <div className="flex items-center space-x-5">
         {onRefresh ? (
-          <div className="flex items-center space-x-2">
-            <span className="text-[10px] text-[#7d8590] font-mono">Last Sync: {formatLastUpdated()}</span>
+          <div className="flex items-center space-x-3">
+            <span className="text-[11px] text-[#71717a] font-mono tracking-tight">Last sync: {formatLastUpdated()}</span>
             <button
               onClick={onRefresh}
               disabled={isRefreshing}
-              className="p-1.5 rounded-lg border border-[#30363d] bg-[#21262d]/50 hover:bg-[#21262d] text-[#7d8590] hover:text-[#e6edf3] transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+              className="p-1.5 rounded-md hover:bg-white/5 text-[#a1a1aa] hover:text-[#ededed] transition-colors cursor-pointer active:scale-95 disabled:opacity-50 group"
             >
-              <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
             </button>
           </div>
         ) : null}
-        <div className="h-4 w-[1px] bg-[#30363d]" />
-        <div className="flex items-center space-x-2">
-          <User className="w-3.5 h-3.5 text-[#7d8590]" />
-          <span className="text-xs font-semibold text-[#e6edf3]">{user ? user.name : 'Loading User'}</span>
+        
+        <div className="h-4 w-[1px] bg-white/10" />
+        
+        <div className="flex items-center space-x-2 px-2 py-1 rounded-md hover:bg-white/5 transition-colors cursor-pointer">
+          <div className="w-5 h-5 rounded-full bg-white/10 border border-white/5 flex items-center justify-center">
+            <User className="w-3 h-3 text-[#ededed]" />
+          </div>
+          <span className="text-[13px] font-medium text-[#ededed] tracking-tight">{user ? user.name : 'Loading...'}</span>
         </div>
       </div>
     </header>

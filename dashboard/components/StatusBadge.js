@@ -4,9 +4,12 @@ import { getStatusColor } from '../lib/utils';
 export default function StatusBadge({ status }) {
   const colorClass = getStatusColor(status);
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider border ${colorClass}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current mr-1.5"></span>
-      {status}
-    </span>
+    <div className={`inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tracking-tight border bg-opacity-10 ${colorClass}`}>
+      <span className="relative flex h-1.5 w-1.5">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-40"></span>
+        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-current"></span>
+      </span>
+      <span className="capitalize">{status}</span>
+    </div>
   );
 }

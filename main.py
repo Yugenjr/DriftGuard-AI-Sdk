@@ -107,6 +107,7 @@ class DBModel(Base):
     version = Column(String(50), default="1.0.0")
     features_json = Column(Text, default="[]")
     reference_data_path = Column(String(255), default="")
+    retrain_webhook_url = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=get_ist_time)
 
     project = relationship("DBProject", back_populates="models")
@@ -232,7 +233,14 @@ try:
                 print("[Migration] Adding last_heartbeat column to dg_retraining_events...")
                 conn.execute(text("ALTER TABLE dg_retraining_events ADD COLUMN last_heartbeat TIMESTAMP;"))
                 
-    # 7. Seed default user and project if missing
+    # 7. Add retrain_webhook_url column to dg_models
+        if inspector.has_table("dg_models"):
+            cols = [c["name"] for c in inspector.get_columns("dg_models")]
+            if "retrain_webhook_url" not in cols:
+                print("[Migration] Adding retrain_webhook_url column to dg_models...")
+                conn.execute(text("ALTER TABLE dg_models ADD COLUMN retrain_webhook_url VARCHAR(500);"))
+
+    # 8. Seed default user and project if missing
     db = SessionLocal()
     try:
         default_user = db.query(DBUser).filter(DBUser.email == "admin@driftguard.com").first()
@@ -347,6 +355,9 @@ class RegisterModelRequest(BaseModel):
     drift_threshold: float = Field(0.15, example=0.15)
     reference_data_path: str = Field("", example="./data/baseline.parquet")
     features: List[str] = Field(default_factory=list, example=["amount", "location_score", "velocity"])
+
+class WebhookUpdateRequest(BaseModel):
+    webhook_url: Optional[str] = Field(None, example="http://airflow:8080/api/v1/dags/retrain_model/dagRuns")
     accuracy: Optional[float] = Field(default=None, example=0.85)
     version: Optional[str] = Field(default="1.0.0", example="1.0.0")
 
@@ -698,6 +709,13 @@ def register_model_explicit(req: ExplicitRegisterModelRequest, current_user: DBU
 
     return {"status": "registered", "model_id": req.model_id}
 
+@app.put("/models/{model_id}/webhook", summary="Update the webhook URL for external retraining orchestrators")
+def update_webhook(model_id: str, req: WebhookUpdateRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    model = verify_model_access(db, current_user, model_id)
+    model.retrain_webhook_url = req.webhook_url
+    db.commit()
+    return {"status": "updated", "webhook_url": req.webhook_url}
+
 @app.delete("/models/{model_id}", summary="Delete a model and all its historical telemetry, versions, and events")
 def delete_model(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
     model = verify_model_access(db, current_user, model_id)
@@ -834,6 +852,7 @@ def list_models(current_user: DBUser = Depends(get_current_user), db: Session = 
         "version": m.version,
         "features": json.loads(m.features_json),
         "reference_data_path": m.reference_data_path,
+        "retrain_webhook_url": m.retrain_webhook_url,
         "created_at": m.created_at.isoformat()
     } for m in models]
 
@@ -852,6 +871,7 @@ def get_model_details(model_id: str, current_user: DBUser = Depends(get_current_
         "version": model.version,
         "features": json.loads(model.features_json),
         "reference_data_path": model.reference_data_path,
+        "retrain_webhook_url": model.retrain_webhook_url,
         "created_at": model.created_at.isoformat()
     }
 
@@ -1113,6 +1133,26 @@ def trigger_retraining(model_id: str, req: RetrainTriggerRequest, background_tas
             "event_id": event.id,
             "message": "Event recorded. SDK callback pipeline will report results via /complete.",
         }
+
+    if model.retrain_webhook_url:
+        # ── WEBHOOK DRIVEN DISTRIBUTED RETRAINING ──
+        def fire_webhook():
+            try:
+                print(f"[Webhook] Firing webhook for model {model_id} to {model.retrain_webhook_url}")
+                payload = {
+                    "event_id": event.id,
+                    "model_id": model_id,
+                    "drift_score": req.drift_score,
+                    "callback_url": f"http://localhost:8000/retrain/{model_id}/complete"
+                }
+                with httpx.Client(timeout=10.0) as client:
+                    resp = client.post(model.retrain_webhook_url, json=payload)
+                    print(f"[Webhook] Response: {resp.status_code}")
+            except Exception as e:
+                print(f"[Webhook] Failed to hit webhook: {e}")
+        
+        background_tasks.add_task(fire_webhook)
+        return {"status": "triggered_webhook", "event_id": event.id, "message": "Webhook fired to orchestrator."}
 
     # Default: push to FastAPI background executor (server-side pipeline)
     background_tasks.add_task(

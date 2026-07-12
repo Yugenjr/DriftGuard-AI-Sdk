@@ -35,8 +35,8 @@ function Dashboard() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-base font-bold text-[#e6edf3]">Model Observability Fleet</h2>
-              <p className="text-xs text-[#7d8590]">Select a model deployment to inspect sliding-window telemetry reports and version audit logs.</p>
+              <h2 className="text-base font-bold text-[#ededed]">Model Observability Fleet</h2>
+              <p className="text-xs text-[#a1a1aa]">Select a model deployment to inspect sliding-window telemetry reports and version audit logs.</p>
             </div>
           </div>
 
@@ -45,7 +45,7 @@ function Dashboard() {
             /* Skeleton Loading State */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(6)].map((_, idx) => (
-                <div key={idx} className="bg-[#1c2128] border border-[#30363d] p-5 rounded-lg h-[210px] space-y-4 animate-pulse">
+                <div key={idx} className="bg-[#18181b] border border-white/10 p-5 rounded-xl h-[210px] space-y-4 animate-pulse">
                   <div className="flex justify-between items-center">
                     <div className="h-4 bg-[#30363d] rounded w-2/3" />
                     <div className="h-4 bg-[#30363d] rounded w-1/4" />
@@ -60,23 +60,23 @@ function Dashboard() {
             </div>
           ) : !models || models.length === 0 ? (
             /* Empty State Guide */
-            <div className="bg-[#1c2128] border border-[#30363d] rounded-lg p-8 md:p-10 shadow-lg text-center max-w-2xl mx-auto space-y-6">
+            <div className="bg-[#18181b] border border-white/10 rounded-xl p-8 md:p-10 shadow-md shadow-black/40 text-center max-w-2xl mx-auto space-y-6">
               <div className="space-y-2">
-                <span className="p-3 bg-[#21262d] border border-[#30363d] rounded-xl inline-block text-[#58a6ff]">
+                <span className="p-3 bg-[#2e2e2e] border border-white/10 rounded-xl inline-block text-[#24b47e]">
                   <Terminal className="w-6 h-6" />
                 </span>
-                <h3 className="text-base font-bold text-[#e6edf3]">No Monitored Models Detected</h3>
-                <p className="text-xs text-[#7d8590] leading-relaxed max-w-md mx-auto">
+                <h3 className="text-base font-bold text-[#ededed]">No Monitored Models Detected</h3>
+                <p className="text-xs text-[#a1a1aa] leading-relaxed max-w-md mx-auto">
                   Ensure your machine learning deployment is integrated with the DriftGuard SDK to track inputs and outputs.
                 </p>
               </div>
 
               {/* Quick start code block */}
-              <div className="text-left bg-[#0d1117] border border-[#30363d] rounded-lg overflow-hidden font-mono text-[11px] text-[#e6edf3] p-4 space-y-2">
-                <p className="text-[#7d8590]">// 1. Initialize DriftGuard Tracker</p>
+              <div className="text-left bg-[#09090b] border border-white/10 rounded-xl overflow-hidden font-mono text-[11px] text-[#ededed] p-4 space-y-2">
+                <p className="text-[#a1a1aa]">// 1. Initialize DriftGuard Tracker</p>
                 <p>from driftguard import DriftGuard</p>
                 <p>dg = DriftGuard(model_id="my-model", api_url="http://localhost:8000")</p>
-                <p className="text-[#7d8590]">// 2. Wrap model seamlessly and predict normal</p>
+                <p className="text-[#a1a1aa]">// 2. Wrap model seamlessly and predict normal</p>
                 <p>model = dg.wrap(trained_sklearn_model)</p>
                 <p>predictions = model.predict(features)</p>
               </div>

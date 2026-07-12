@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import { LayoutDashboard, Activity, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Activity, Settings, LogOut, BookOpen } from 'lucide-react';
 import { getMe } from '../lib/api';
 
 export default function Sidebar({ activeModelCount }) {
@@ -27,7 +27,8 @@ export default function Sidebar({ activeModelCount }) {
   const navItems = [
     { label: 'Fleet Overview', icon: LayoutDashboard, path: '/dashboard', isActive: (p) => p === '/dashboard' },
     { label: 'Model Metrics', icon: Activity, path: '#', badge: activeModelCount, isActive: (p) => p.startsWith('/models/') },
-    { label: 'System Settings', icon: Settings, path: '#', isActive: (p) => p.startsWith('/settings') }
+    { label: 'Documentation', icon: BookOpen, path: '/docs', isActive: (p) => p.startsWith('/docs') },
+    { label: 'System Settings', icon: Settings, path: '/settings', isActive: (p) => p.startsWith('/settings') }
   ];
 
   const getInitials = (name) => {
@@ -36,14 +37,14 @@ export default function Sidebar({ activeModelCount }) {
   };
 
   return (
-    <div className="w-[240px] bg-[#161b22] border-r border-[#30363d] flex flex-col justify-between h-screen sticky top-0">
+    <div className="w-[240px] bg-[#18181b] border-r border-white/10 flex flex-col justify-between h-screen sticky top-0 font-sans">
       <div>
         {/* Brand Header */}
-        <div className="px-6 py-5 border-b border-[#30363d] flex items-center space-x-3">
+        <div className="px-6 py-6 border-b border-white/10 flex items-center space-x-3 bg-gradient-to-b from-[#161616] to-[#111111]">
           <span className="text-xl">🛡️</span>
           <div>
-            <h1 className="text-sm font-extrabold tracking-wider text-[#e6edf3]">DRIFTGUARD</h1>
-            <span className="text-[9px] text-[#7d8590] uppercase tracking-widest font-semibold">Self-Healing MLOps</span>
+            <h1 className="text-sm font-bold tracking-tight text-[#ededed]">DRIFTGUARD</h1>
+            <span className="text-[9px] text-[#a1a1aa] uppercase tracking-widest font-medium">Self-Healing MLOps</span>
           </div>
         </div>
 
@@ -56,18 +57,18 @@ export default function Sidebar({ activeModelCount }) {
               <button
                 key={idx}
                 onClick={() => item.path !== '#' && router.push(item.path)}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold tracking-wide transition-all group ${
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[13px] font-medium tracking-wide transition-all group ${
                   isActive
-                    ? 'bg-[#1c2128] text-[#58a6ff] border border-[#30363d]'
-                    : 'text-[#7d8590] hover:text-[#e6edf3] hover:bg-[#1c2128]/50 border border-transparent'
+                    ? 'bg-[#18181b] text-[#ededed] border border-white/10 shadow-sm'
+                    : 'text-[#a1a1aa] hover:text-[#ededed] hover:bg-[#18181b]/60 border border-transparent'
                 }`}
               >
                 <div className="flex items-center space-x-2.5">
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-[#58a6ff]' : 'text-[#7d8590] group-hover:text-[#e6edf3]'}`} />
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-[#24b47e]' : 'text-[#a1a1aa] group-hover:text-[#ededed]'}`} />
                   <span>{item.label}</span>
                 </div>
                 {item.badge !== undefined && item.badge > 0 ? (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-[#1c2d3a] text-[#58a6ff] border border-[#243e56]/40 font-bold">
+                  <span className="px-1.5 py-0.5 rounded-xl text-[10px] bg-[#24b47e]/10 text-[#24b47e] border border-[#24b47e]/30 font-semibold">
                     {item.badge}
                   </span>
                 ) : null}
@@ -78,23 +79,23 @@ export default function Sidebar({ activeModelCount }) {
       </div>
 
       {/* User Footer Profile */}
-      <div className="p-4 border-t border-[#30363d] bg-[#0d1117]/40 flex flex-col space-y-3">
+      <div className="p-4 border-t border-white/10 bg-[#09090b]/40 flex flex-col space-y-4">
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#58a6ff] to-[#a371f7] flex items-center justify-center text-[11px] font-bold text-[#0d1117]">
+          <div className="w-8 h-8 rounded-xl bg-[#2e2e2e] border border-[#404040] flex items-center justify-center text-[11px] font-bold text-[#ededed]">
             {user ? getInitials(user.name) : 'DG'}
           </div>
           <div className="flex-1 min-w-0">
-            <span className="block text-xs font-semibold text-[#e6edf3] truncate">
+            <span className="block text-xs font-semibold text-[#ededed] truncate">
               {user ? user.name : 'DriftGuard User'}
             </span>
-            <span className="block text-[10px] text-[#7d8590] truncate">
+            <span className="block text-[10px] text-[#a1a1aa] truncate">
               {user ? user.email : 'loading...'}
             </span>
           </div>
         </div>
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center justify-center space-x-2 px-3 py-2 rounded-lg bg-[#21262d] border border-[#30363d] hover:bg-[#f85149] hover:text-[#e6edf3] hover:border-[#f85149] text-xs font-semibold text-[#7d8590] transition-all"
+          className="w-full flex items-center justify-center space-x-2 px-3 py-2 rounded-xl bg-[#09090b] border border-white/10 hover:bg-[#18181b] hover:text-[#ededed] hover:border-[#404040] text-xs font-medium text-[#a1a1aa] transition-all"
         >
           <LogOut className="w-3.5 h-3.5" />
           <span>Sign Out</span>
