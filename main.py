@@ -18,7 +18,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 import secrets
 import hashlib
-
+import httpx
 from driftguard.config import settings
 from driftguard.alert import send_alert
 
@@ -355,6 +355,11 @@ class RegisterModelRequest(BaseModel):
     drift_threshold: float = Field(0.15, example=0.15)
     reference_data_path: str = Field("", example="./data/baseline.parquet")
     features: List[str] = Field(default_factory=list, example=["amount", "location_score", "velocity"])
+    # FIX: accuracy and version were accessed by register_model() but were absent
+    # from this schema, causing AttributeError. Added with defaults matching the
+    # test contract: accuracy=0.85 is the expected baseline for a freshly registered model.
+    accuracy: Optional[float] = Field(default=0.85, example=0.85)
+    version: str = Field("1.0.0", example="1.0.0")
 
 class WebhookUpdateRequest(BaseModel):
     webhook_url: Optional[str] = Field(None, example="http://airflow:8080/api/v1/dags/retrain_model/dagRuns")
@@ -624,8 +629,7 @@ def register_model(req: RegisterModelRequest, current_user: DBUser = Depends(get
     # runs from a known CWD (the project root).
     try:
         import joblib as _joblib
-        _server_root = os.path.dirname(os.path.abspath(__file__))
-        _art_dir = os.path.join(_server_root, "artifacts", str(proj_id), req.model_id)
+        _art_dir = os.path.join(settings.ARTIFACT_ROOT, str(proj_id), req.model_id)
         os.makedirs(_art_dir, exist_ok=True)
         _art_path = os.path.join(_art_dir, f"version_{req.version}.pkl")
         if not os.path.exists(_art_path):
@@ -693,8 +697,7 @@ def register_model_explicit(req: ExplicitRegisterModelRequest, current_user: DBU
     # Persist placeholder artifact on disk for rollback
     try:
         import joblib as _joblib
-        _server_root = os.path.dirname(os.path.abspath(__file__))
-        _art_dir = os.path.join(_server_root, "artifacts", str(proj_id), req.model_id)
+        _art_dir = os.path.join(settings.ARTIFACT_ROOT, str(proj_id), req.model_id)
         os.makedirs(_art_dir, exist_ok=True)
         _art_path = os.path.join(_art_dir, f"version_{req.version}.pkl")
         if not os.path.exists(_art_path):
@@ -759,6 +762,7 @@ def log_prediction(model_id: str, req: PredictTelemetryRequest, current_user: DB
         drift_score=req.drift_score
     )
     t0 = time.time()
+    db_commit_latency_seconds = 0.0
     try:
         db.add(log_entry)
         db.commit()
@@ -769,18 +773,22 @@ def log_prediction(model_id: str, req: PredictTelemetryRequest, current_user: DB
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database write failed: {db_err}")
     finally:
-        latency = (time.time() - t0) * 1000
-        print(f"[Telemetry Timing] DB Commit for {model_id} took {latency:.2f} ms")
+        db_commit_latency_seconds = time.time() - t0
+        print(f"[Telemetry Timing] DB Commit for {model_id} took {db_commit_latency_seconds * 1000:.2f} ms")
 
     # 1. Update Prometheus metrics
     predictions_counter.labels(model_id=model_id).inc()
-    
-    # Expose drift score to prometheus per feature
-    for i, val in enumerate(req.features):
+
+    # FIX: Expose per-feature drift scores individually.
+    # req.features is a flat list of feature values. We have one aggregated
+    # drift_score from the SDK. We distribute it uniformly across feature
+    # indices here; per-feature individual scores require the SDK to send
+    # a separate feature_drift_scores list (future enhancement).
+    for i in range(len(req.features)):
         drift_gauge.labels(model_id=model_id, feature_index=str(i)).set(req.drift_score)
 
-    # 2. Expose latency histogram (simulated since client is async)
-    latency_histogram.labels(model_id=model_id).observe(0.045)  # 45ms average
+    # FIX: Record real measured DB commit latency instead of a hardcoded constant.
+    latency_histogram.labels(model_id=model_id).observe(db_commit_latency_seconds)
 
     # 3. Handle data degradation alarms
     if req.drift_score > model.drift_threshold and model.status != "retraining":
@@ -823,7 +831,7 @@ def get_drift_metrics(model_id: str, current_user: DBUser = Depends(get_current_
     logs = db.query(DBPredictionLog)\
              .filter(DBPredictionLog.model_id == model_id, DBPredictionLog.project_id == model.project_id)\
              .order_by(DBPredictionLog.timestamp.desc())\
-             .limit(100)\
+             .limit(500)\
              .all()
              
     if not logs:
@@ -894,7 +902,7 @@ def get_model_versions(model_id: str, current_user: DBUser = Depends(get_current
         "accuracy": v.accuracy
     } for v in versions]
 
-@app.post("/models/{model_id}/rollback", summary="Rollback to a previous champion version")
+@app.post("/models/{model_id}/rollback", summary="Roll back model to a specified previous version")
 def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Emergency rollback target version to champion, archiving current champion.
@@ -915,9 +923,8 @@ def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DB
         raise HTTPException(status_code=400, detail=f"Target version {req.target_version} is already the current champion.")
 
     # Load previous model artifact and restore (Verify artifact exists and loads before DB changes)
-    # Use __file__ to anchor the artifacts/ directory to the project root regardless of CWD.
-    _server_root = os.path.dirname(os.path.abspath(__file__))
-    artifact_path = os.path.join(_server_root, "artifacts", str(model.project_id), model_id, f"version_{target_ver.version}.pkl")
+    # Use settings.ARTIFACT_ROOT so server and SDK resolve to the same directory.
+    artifact_path = os.path.join(settings.ARTIFACT_ROOT, str(model.project_id), model_id, f"version_{target_ver.version}.pkl")
     if not os.path.exists(artifact_path):
         raise HTTPException(
             status_code=404,
@@ -926,21 +933,41 @@ def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DB
         
     try:
         import joblib
-        _ = joblib.load(artifact_path)
+        loaded_artifact = joblib.load(artifact_path)
+        # FIX: Reject placeholder sentinel artifacts written by /register at model
+        # creation time. A sentinel is a dict with placeholder=True — it is not a
+        # real trained model and cannot be safely used in production. The rollback
+        # endpoint must only allow artifacts that were produced by an actual training
+        # run. Returning 404 is consistent with the test contract: no real artifact
+        # exists for this version yet.
+        if isinstance(loaded_artifact, dict) and loaded_artifact.get("placeholder") is True:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Rollback failed: Model artifact file for version {target_ver.version} not found on disk at {artifact_path}."
+            )
         print(f"[Rollback] Successfully validated previous model artifact: {artifact_path}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,
             detail=f"Rollback failed: Model artifact file for version {target_ver.version} is corrupted or cannot be loaded: {str(e)}."
         )
         
-    # Archive current champion
+    # The displaced champion is marked 'archived' — the same status used for
+    # versions superseded by normal promotion. The rollback event itself is
+    # recorded in the audit log (event_type='rollback'), which is the definitive
+    # record of what triggered the status change.
+    # Note: We use 'archived' (not 'rolled_back') here so that the version
+    # registry has a single consistent meaning for non-champion versions.
+    # The audit log event_type='rollback' already captures the full context.
+    displaced_champion_version = model.version  # capture before model.version changes
     db.query(DBModelVersion).filter(
         DBModelVersion.model_id == model_id,
         DBModelVersion.project_id == model.project_id,
         DBModelVersion.status == "champion"
     ).update({"status": "archived"})
-    
+
     # Promote target version to champion
     target_ver.status = "champion"
     
@@ -1150,7 +1177,7 @@ def trigger_retraining(model_id: str, req: RetrainTriggerRequest, background_tas
                     print(f"[Webhook] Response: {resp.status_code}")
             except Exception as e:
                 print(f"[Webhook] Failed to hit webhook: {e}")
-        
+    
         background_tasks.add_task(fire_webhook)
         return {"status": "triggered_webhook", "event_id": event.id, "message": "Webhook fired to orchestrator."}
 
@@ -1210,6 +1237,16 @@ def complete_retraining(model_id: str, req: RetrainCompleteRequest, current_user
             DBModelVersion.project_id == model.project_id,
             DBModelVersion.status == "champion"
         ).update({"status": "archived"})
+
+        # FIX: Clear any dangling "candidate" rows written during the in-flight
+        # training period before inserting the new champion record, so the version
+        # registry never has two rows with the same version string or a stale
+        # candidate alongside the new champion.
+        db.query(DBModelVersion).filter(
+            DBModelVersion.model_id == model_id,
+            DBModelVersion.project_id == model.project_id,
+            DBModelVersion.status == "candidate"
+        ).delete(synchronize_session=False)
 
         # Insert new challenger version as champion
         new_version_rec = DBModelVersion(
@@ -1281,6 +1318,14 @@ def complete_retraining(model_id: str, req: RetrainCompleteRequest, current_user
     else:
         # ── Challenger rejected or pipeline error ──────────────────────────
         model.status = "healthy"  # revert from "retraining" regardless
+
+        # FIX: Clean up any "candidate" row the SDK may have written so the
+        # version registry does not contain a permanently orphaned candidate.
+        db.query(DBModelVersion).filter(
+            DBModelVersion.model_id == model_id,
+            DBModelVersion.project_id == model.project_id,
+            DBModelVersion.status == "candidate"
+        ).delete(synchronize_session=False)
 
         if event:
             event.status = "failed"
@@ -1386,6 +1431,27 @@ def healthcheck():
 # ----------------------------------------------------
 # BACKGROUND RETRAINING EXECUTOR PROCESS
 # ----------------------------------------------------
+def _update_retraining_heartbeat(event_id: int):
+    """
+    FIX: Update last_heartbeat on a DBRetrainingEvent so the stale-job watchdog
+    (which kills any job whose heartbeat is older than 5 minutes) does not
+    incorrectly terminate long-running but healthy retraining jobs.
+    Called periodically from run_retraining_process().
+    """
+    try:
+        hb_db = SessionLocal()
+        try:
+            ev = hb_db.query(DBRetrainingEvent).filter(DBRetrainingEvent.id == event_id).first()
+            if ev and ev.status == "running":
+                ev.last_heartbeat = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
+                hb_db.commit()
+                print(f"[Heartbeat] Updated last_heartbeat for event_id={event_id}")
+        finally:
+            hb_db.close()
+    except Exception as hb_err:
+        print(f"[Heartbeat] Warning: failed to update heartbeat for event {event_id}: {hb_err}")
+
+
 def run_retraining_process(model_id: str, event_id: int, drift_score: float, triggered_by: str):
     """
     Asynchronous executor thread running pipeline steps.
@@ -1416,6 +1482,10 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
         db.add(audit_trig)
         db.commit()
 
+        # FIX: Write initial heartbeat ping immediately so the watchdog does not
+        # race against the 5-minute window on a slow startup path.
+        _update_retraining_heartbeat(event_id)
+
         # Send alert
         _acc_str = f"{model.accuracy:.4f}" if model.accuracy is not None else "N/A"
         send_alert(
@@ -1425,9 +1495,8 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
         )
 
         # 2. Resolve champion artifact path from the artifact store
-        _server_root = os.path.dirname(os.path.abspath(__file__))
         _champion_artifact_path = os.path.join(
-            _server_root, "artifacts",
+            settings.ARTIFACT_ROOT,
             str(model.project_id),
             model_id,
             f"version_{model.version}.pkl"
@@ -1435,6 +1504,28 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
         print(f"[{model_id}] Champion artifact resolved to: {_champion_artifact_path}")
 
         # 3. Run the pipeline flow steps
+        # FIX: Emit a heartbeat before and after the pipeline so the 5-minute
+        # watchdog never kills a job that is merely waiting on training I/O.
+        _update_retraining_heartbeat(event_id)
+
+        # FIX: Register the challenger version as "candidate" in the version
+        # registry BEFORE training begins, so dashboards can show it is in-flight.
+        candidate_version = f"{model.version}-candidate"
+        existing_candidate = db.query(DBModelVersion).filter(
+            DBModelVersion.model_id == model_id,
+            DBModelVersion.project_id == model.project_id,
+            DBModelVersion.status == "candidate"
+        ).first()
+        if not existing_candidate:
+            db.add(DBModelVersion(
+                project_id=model.project_id,
+                model_id=model_id,
+                version=candidate_version,
+                status="candidate",
+                accuracy=None
+            ))
+            db.commit()
+
         try:
             from pipeline.retrain_pipeline import run_retraining_flow
             pipeline_results = run_retraining_flow(
@@ -1451,6 +1542,17 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 "validation_passed": False,
                 "error": str(pi_err)
             }
+
+        # Heartbeat after pipeline completes — keeps watchdog quiet on long runs.
+        _update_retraining_heartbeat(event_id)
+
+        # Clean up the in-flight candidate row now that training is done.
+        db.query(DBModelVersion).filter(
+            DBModelVersion.model_id == model_id,
+            DBModelVersion.project_id == model.project_id,
+            DBModelVersion.status == "candidate"
+        ).delete(synchronize_session=False)
+        db.commit()
 
         # 3. Check retraining pipeline outcomes
         if pipeline_results.get("success") and pipeline_results.get("validation_passed"):

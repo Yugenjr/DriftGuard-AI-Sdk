@@ -67,6 +67,7 @@ class RetrainerCallbackRunner:
 
         # Step 1 — Record event on the server (no background task spawned)
         current_version = self._get_current_version()
+        highest_version = self._get_highest_version()
         event_id = self._notify_retrain_start(drift_score)
 
         try:
@@ -93,7 +94,7 @@ class RetrainerCallbackRunner:
 
             # Step 4 — Promote challenger
             print("PROMOTION STAGE STARTED")
-            new_version = self._bump_version(current_version)
+            new_version = self._bump_version(highest_version)
             print(f"NEW VERSION = {new_version}")
 
             # Persist challenger model before promotion
@@ -242,6 +243,26 @@ class RetrainerCallbackRunner:
         except Exception as exc:
             logger.debug(f"[{self.model_id}] Could not fetch current version: {exc}")
         return "1.0.0"
+
+    def _get_highest_version(self) -> str:
+        """Fetch the highest registered version string from the API's version history."""
+        try:
+            headers = {"X-API-Key": self.tracker.api_key} if self.tracker.api_key else {}
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(f"{self.api_url}/models/{self.model_id}/versions", headers=headers)
+                if resp.status_code == 200:
+                    versions = [v.get("version", "1.0.0") for v in resp.json()]
+                    if versions:
+                        def parse_ver(v):
+                            try:
+                                return [int(p) for p in v.split(".")]
+                            except Exception:
+                                return [0]
+                        versions.sort(key=parse_ver, reverse=True)
+                        return versions[0]
+        except Exception as exc:
+            logger.debug(f"[{self.model_id}] Could not fetch highest version: {exc}")
+        return self._get_current_version()
 
     def _bump_version(self, current_version: str) -> str:
         """Increment the patch segment of a semantic version string."""
