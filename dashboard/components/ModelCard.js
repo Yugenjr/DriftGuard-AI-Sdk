@@ -53,7 +53,7 @@ export default function ModelCard({ model }) {
         </div>
         <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/5">
           <div
-            className={`h-full rounded-full transition-all duration-700 ease-out ${accuracyColorClass}`}
+            className={`h-full bg-current rounded-full transition-all duration-700 ease-out ${accuracyColorClass}`}
             style={{ width: `${Math.min(100, (accuracyVal > 1.0 ? accuracyVal : accuracyVal * 100))}%` }}
           />
         </div>

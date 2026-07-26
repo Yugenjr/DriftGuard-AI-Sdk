@@ -51,7 +51,7 @@ export default function DriftChart({ data, threshold }) {
   return (
     <div className="bg-[#18181b] border border-white/10 p-5 rounded-xl shadow-md space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-[#ededed]">Drift Score — Last 100 Predictions</h3>
+        <h3 className="text-sm font-bold text-[#ededed]">Drift Score — Last 500 Predictions</h3>
         <span className="text-[11px] font-semibold text-[#a1a1aa] bg-[#2e2e2e] border border-white/10 px-2 py-0.5 rounded">
           Active Limit: {threshold}
         </span>

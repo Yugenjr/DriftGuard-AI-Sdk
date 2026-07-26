@@ -11,7 +11,7 @@ long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="driftguard-ai-sdk",
-    version="1.0.3",  # Increment version before uploading
+    version="1.0.4",  # Increment version before uploading
     description="Production-grade AI model monitoring, drift detection, and autonomous retraining platform",
     long_description=long_description,
     long_description_content_type="text/markdown",
