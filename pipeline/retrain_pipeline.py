@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import logging
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 # Prefect for Flow Orchestration
 try:
@@ -68,25 +68,27 @@ logger = logging.getLogger("DriftGuard.RetrainPipeline")
 # ZENML STEPS DEFINITION (Isolated execution)
 # ----------------------------------------------------
 @step
-def data_ingestion_step(model_id: str) -> pd.DataFrame:
+def data_ingestion_step(model_id: str, data_path: Optional[str] = None) -> pd.DataFrame:
     """
-    Ingests training features for the server-side fallback pipeline.
-
-    WARNING — DEMO DATA
-    --------------------
-    This step loads the scikit-learn breast cancer dataset as a **demo
-    fallback** for the built-in server-side retraining pipeline.  It is
-    intentionally NOT connected to production telemetry.  Production
-    telemetry (the ``dg_predictions`` table) must never automatically become
-    training data.
-
-    To use your own trusted dataset, register a callback with
-    ``@dg.retrainer`` in your SDK client code instead.  The callback runs
-    entirely inside your process and loads whatever data source you specify.
+    Ingests training features. Supports reading from a parquet/csv dataset path if supplied.
+    Otherwise, defaults to loading the scikit-learn breast cancer dataset for fallback demo.
     """
+    if data_path and os.path.exists(data_path):
+        logger.info(f"[{model_id}] Ingesting training dataset from custom path: {data_path}")
+        try:
+            if data_path.endswith(".parquet"):
+                return pd.read_parquet(data_path)
+            elif data_path.endswith(".csv"):
+                return pd.read_csv(data_path)
+            else:
+                # Fallback to general read if extension format is unknown
+                return pd.read_table(data_path)
+        except Exception as e:
+            logger.error(f"[{model_id}] Failed to read data from {data_path}: {e}. Falling back to demo data.")
+
     logger.warning(
-        f"[{model_id}] SERVER-SIDE DEMO PIPELINE: loading breast cancer dataset. "
-        "Register @dg.retrainer in the SDK to use your own trusted data."
+        f"[{model_id}] SERVER-SIDE PIPELINE: loading fallback breast cancer dataset. "
+        "Register @dg.retrainer in the SDK to run retraining on your own client-side data."
     )
     from sklearn.datasets import load_breast_cancer
     data = load_breast_cancer()
@@ -255,8 +257,17 @@ def retrain_model_with_tracking(
     params = {"max_depth": 5, "n_estimators": 100, "algorithm": "RandomForest"}
     metrics = {"accuracy": val_acc, "f1": f1}
     
-    new_version_suffix = int(current_version.split('.')[-1]) + 1
-    new_version = f"1.0.{new_version_suffix}"
+    # Graceful semantic version bump (bumps major, minor, or patch appropriately)
+    try:
+        ver_parts = current_version.split('.')
+        if len(ver_parts) == 3:
+            new_version = f"{ver_parts[0]}.{ver_parts[1]}.{int(ver_parts[2]) + 1}"
+        elif len(ver_parts) == 2:
+            new_version = f"{ver_parts[0]}.{int(ver_parts[1]) + 1}"
+        else:
+            new_version = f"{current_version}.1"
+    except Exception:
+        new_version = f"{current_version}-challenger"
 
     if mlflow is not None:
         try:

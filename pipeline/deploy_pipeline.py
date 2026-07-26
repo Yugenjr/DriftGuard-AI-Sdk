@@ -113,8 +113,11 @@ def simulate_live_telemetry() -> Tuple[float, float]:
     """
     Simulates real-time telemetry metrics scraping.
     """
-    # Under ordinary circumstances, metrics are healthy:
-    # 1.2% error rate, 42ms p99 latency
+    # Guard: Allow simulating a canary failure or real telemetry scraping using env vars
+    if os.getenv("DEMO_CANARY_FAIL", "false").lower() == "true":
+        return 0.12, 600.0  # Fails SLA checks (12% error rate, 600ms latency)
+    
+    # Healthy canary split telemetry defaults
     return 0.012, 42.0
 
 def rollback_canary(model_id: str):

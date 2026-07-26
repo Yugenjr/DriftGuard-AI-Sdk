@@ -16,11 +16,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Boolean, func, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+import logging
 import secrets
 import hashlib
 import httpx
 from driftguard.config import settings
 from driftguard.alert import send_alert
+
+# Initialize logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("DriftGuard.API")
 
 # Create database directory if using SQLite
 if settings.MLFLOW_TRACKING_URI.startswith("sqlite:///"):
@@ -245,7 +250,10 @@ try:
     try:
         default_user = db.query(DBUser).filter(DBUser.email == "admin@driftguard.com").first()
         if not default_user:
-            default_key = "dg-default-key"
+            # SECURITY FIX: Never use a hardcoded default key in production.
+            # Read from env var; fall back to a randomly-generated key logged once.
+            # Set DRIFTGUARD_DEFAULT_API_KEY in .env to get a stable key across restarts.
+            default_key = os.getenv("DRIFTGUARD_DEFAULT_API_KEY") or f"dg-{secrets.token_hex(16)}"
             hash_val = hashlib.sha256(default_key.encode("utf-8")).hexdigest()
             default_user = DBUser(
                 email="admin@driftguard.com",
@@ -256,7 +264,10 @@ try:
             db.add(default_user)
             db.commit()
             db.refresh(default_user)
-            print(f"Created default user with API key: {default_key}")
+            logger.warning(
+                f"[STARTUP] Default admin user created. API Key: {default_key} "
+                "— Set DRIFTGUARD_DEFAULT_API_KEY in .env to make this persistent."
+            )
             
         default_project = db.query(DBProject).filter(DBProject.owner_id == default_user.id).first()
         if not default_project:
@@ -323,17 +334,23 @@ import traceback
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    print(f"[ERROR] Global Exception Caught: {exc}")
+    # SECURITY FIX: Never expose raw exception messages to API consumers.
+    # Internal details are logged server-side only.
+    logger.error(f"[ERROR] Unhandled exception on {request.method} {request.url.path}: {exc}")
     traceback.print_exc()
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error", "exception": str(exc)}
+        content={"detail": "Internal Server Error"}
     )
 
-# Enable CORS for dashboard queries
+# SECURITY FIX: CORS origins are configurable via CORS_ALLOWED_ORIGINS env var.
+# Defaults to localhost dashboard + Grafana. Set to "*" only for open development.
+_cors_origins_raw = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")
+_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -436,22 +453,22 @@ async def api_key_auth_middleware(request: Request, call_next):
 
     # Get API key header
     api_key = request.headers.get("X-API-Key")
-    print("API KEY RECEIVED =", api_key)
+    # SECURITY FIX: Never print API keys to stdout — they are credentials.
     if not api_key:
-        print("AUTH RESULT = Failed: Missing X-API-Key header")
+        logger.debug("AUTH: Missing X-API-Key header on %s %s", request.method, request.url.path)
         return Response(content="Unauthorized: Missing X-API-Key header", status_code=401)
 
-    # Hash the key
+    # Hash the key before any DB lookup
     api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 
-    # Query user
+    # Query user by hash only — plaintext key never touches the DB
     db = SessionLocal()
     try:
         user = db.query(DBUser).filter(DBUser.api_key_hash == api_key_hash, DBUser.is_active == True).first()
-        print("USER =", user.email if user else None)
         if not user:
-            print("AUTH RESULT = Failed: Invalid API Key")
+            logger.debug("AUTH: Invalid API key on %s %s", request.method, request.url.path)
             return Response(content="Unauthorized: Invalid API Key", status_code=401)
+        logger.debug("AUTH: Authenticated user=%s", user.email)
         request.state.user = user
     finally:
         db.close()
@@ -645,435 +662,8 @@ def register_model(req: RegisterModelRequest, current_user: DBUser = Depends(get
     
     return {"status": "registered", "model_id": req.model_id}
 
-@app.post("/models/register", summary="Explicitly register a model with metadata")
-def register_model_explicit(req: ExplicitRegisterModelRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Explicitly registers a new model and its metadata (threshold, version, accuracy, features).
-    """
-    proj_id = req.project_id
-    if proj_id is None:
-        # Fallback to default project for this user
-        project = db.query(DBProject).filter(DBProject.owner_id == current_user.id).first()
-        if not project:
-            project = DBProject(name="Default Project", owner_id=current_user.id)
-            db.add(project)
-            db.commit()
-            db.refresh(project)
-        proj_id = project.id
-    else:
-        project = db.query(DBProject).filter(DBProject.id == proj_id, DBProject.owner_id == current_user.id).first()
-        if not project:
-            raise HTTPException(status_code=403, detail="Forbidden: Project does not exist or you do not own it.")
+# Remaining routes migrated to routers/
 
-    # Reject duplicate registrations
-    existing = db.query(DBModel).filter(DBModel.model_id == req.model_id, DBModel.project_id == proj_id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Model already registered.")
-
-    new_model = DBModel(
-        model_id=req.model_id,
-        project_id=proj_id,
-        owner_id=current_user.id,
-        drift_threshold=req.drift_threshold,
-        status="healthy",
-        accuracy=req.accuracy,
-        version=req.version,
-        features_json=json.dumps(req.features),
-        reference_data_path=""
-    )
-    db.add(new_model)
-
-    # Insert first version as champion in version registry
-    init_version = DBModelVersion(
-        project_id=proj_id,
-        model_id=req.model_id,
-        version=req.version,
-        status="champion",
-        accuracy=req.accuracy
-    )
-    db.add(init_version)
-    db.commit()
-
-    # Persist placeholder artifact on disk for rollback
-    try:
-        import joblib as _joblib
-        _art_dir = os.path.join(settings.ARTIFACT_ROOT, str(proj_id), req.model_id)
-        os.makedirs(_art_dir, exist_ok=True)
-        _art_path = os.path.join(_art_dir, f"version_{req.version}.pkl")
-        if not os.path.exists(_art_path):
-            _joblib.dump({"model_id": req.model_id, "version": req.version, "placeholder": True}, _art_path)
-            print(f"[Register] Wrote initial artifact placeholder to {_art_path}")
-    except Exception as _art_err:
-        print(f"[Register] Warning: Could not write {req.version} artifact placeholder: {_art_err}")
-
-    # Initialize Prometheus metrics
-    if req.accuracy is not None:
-        accuracy_gauge.labels(model_id=req.model_id, version=req.version).set(req.accuracy)
-
-    return {"status": "registered", "model_id": req.model_id}
-
-@app.put("/models/{model_id}/webhook", summary="Update the webhook URL for external retraining orchestrators")
-def update_webhook(model_id: str, req: WebhookUpdateRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    model = verify_model_access(db, current_user, model_id)
-    model.retrain_webhook_url = req.webhook_url
-    db.commit()
-    return {"status": "updated", "webhook_url": req.webhook_url}
-
-@app.delete("/models/{model_id}", summary="Delete a model and all its historical telemetry, versions, and events")
-def delete_model(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    model = verify_model_access(db, current_user, model_id)
-    
-    try:
-        # Cascade delete related entries manually since relationships don't enforce it
-        db.query(DBPredictionLog).filter(DBPredictionLog.model_id == model_id).delete(synchronize_session=False)
-        db.query(DBRetrainingEvent).filter(DBRetrainingEvent.model_id == model_id).delete(synchronize_session=False)
-        db.query(DBAuditLogEntry).filter(DBAuditLogEntry.model_id == model_id).delete(synchronize_session=False)
-        db.query(DBModelVersion).filter(DBModelVersion.model_id == model_id).delete(synchronize_session=False)
-        
-        # Delete the model itself
-        db.delete(model)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete model: {e}")
-        
-    return {"status": "deleted", "model_id": model_id}
-
-@app.post("/predict/{model_id}", summary="Log model telemetry and execute ADWIN tracking")
-def log_prediction(model_id: str, req: PredictTelemetryRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Endpoint called by SDK to record inputs, predictions, and concept drift scores.
-    Updates active Prometheus scrapers.
-    """
-    model = verify_model_access(db, current_user, model_id, allow_missing=True)
-    project = db.query(DBProject).filter(DBProject.owner_id == current_user.id).first()
-    print("PROJECT =", project.name if project else None)
-    print("MODEL =", model.model_id if model else None)
-    print("AUTH RESULT = Success")
-    if not model:
-        raise HTTPException(status_code=404, detail="Model must be registered before telemetry.")
-
-    # Log prediction into Database
-    log_entry = DBPredictionLog(
-        project_id=model.project_id,
-        model_id=model_id,
-        features_json=json.dumps(req.features),
-        prediction_json=json.dumps(req.prediction),
-        drift_score=req.drift_score
-    )
-    t0 = time.time()
-    db_commit_latency_seconds = 0.0
-    try:
-        db.add(log_entry)
-        db.commit()
-    except Exception as db_err:
-        import traceback
-        print(f"[SQLAlchemy Error] Failed to commit telemetry log for {model_id}: {db_err}")
-        traceback.print_exc()
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database write failed: {db_err}")
-    finally:
-        db_commit_latency_seconds = time.time() - t0
-        print(f"[Telemetry Timing] DB Commit for {model_id} took {db_commit_latency_seconds * 1000:.2f} ms")
-
-    # 1. Update Prometheus metrics
-    predictions_counter.labels(model_id=model_id).inc()
-
-    # FIX: Expose per-feature drift scores individually.
-    # req.features is a flat list of feature values. We have one aggregated
-    # drift_score from the SDK. We distribute it uniformly across feature
-    # indices here; per-feature individual scores require the SDK to send
-    # a separate feature_drift_scores list (future enhancement).
-    for i in range(len(req.features)):
-        drift_gauge.labels(model_id=model_id, feature_index=str(i)).set(req.drift_score)
-
-    # FIX: Record real measured DB commit latency instead of a hardcoded constant.
-    latency_histogram.labels(model_id=model_id).observe(db_commit_latency_seconds)
-
-    # 3. Handle data degradation alarms
-    if req.drift_score > model.drift_threshold and model.status != "retraining":
-        model.status = "degraded"
-        db.commit()
-        
-        # Log to Audit Log DB
-        audit = DBAuditLogEntry(
-            project_id=model.project_id,
-            model_id=model_id,
-            event_type="drift_detected",
-            model_version=model.version,
-            drift_score=req.drift_score,
-            triggered_by="automatic",
-            details_json=json.dumps({"message": f"Real-time drift score {req.drift_score:.4f} exceeded threshold {model.drift_threshold}."})
-        )
-        db.add(audit)
-        db.commit()
-
-        # Fire Slack alert
-        send_alert(
-            event_type="drift_detected",
-            message=f"Concept drift detected on model '{model_id}'!",
-            details={
-                "model_id": model_id,
-                "version": model.version,
-                "current_drift_score": f"{req.drift_score:.4f}",
-                "threshold": f"{model.drift_threshold}"
-            }
-        )
-
-    return {"status": "logged", "drift_score": req.drift_score}
-
-@app.get("/drift/{model_id}", summary="Fetch active drift metrics of a model")
-def get_drift_metrics(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Fetches drift metrics history for Recharts visualization.
-    """
-    model = verify_model_access(db, current_user, model_id)
-    logs = db.query(DBPredictionLog)\
-             .filter(DBPredictionLog.model_id == model_id, DBPredictionLog.project_id == model.project_id)\
-             .order_by(DBPredictionLog.timestamp.desc())\
-             .limit(500)\
-             .all()
-             
-    if not logs:
-        return []
-
-    # Return prediction metrics chronological
-    return [{
-        "timestamp": log.timestamp.isoformat(),
-        "drift_score": log.drift_score,
-        "features": json.loads(log.features_json),
-        "prediction": json.loads(log.prediction_json)
-    } for log in reversed(logs)]
-
-@app.get("/models", summary="List all monitored models")
-def list_models(current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Lists monitored models including current active performance, status, and thresholds.
-    """
-    check_and_recover_all_stale_jobs_for_user(current_user.id, db)
-    models = db.query(DBModel).filter(DBModel.owner_id == current_user.id).all()
-    return [{
-        "model_id": m.model_id,
-        "drift_threshold": m.drift_threshold,
-        "status": m.status,
-        "accuracy": m.accuracy,
-        "version": m.version,
-        "features": json.loads(m.features_json),
-        "reference_data_path": m.reference_data_path,
-        "retrain_webhook_url": m.retrain_webhook_url,
-        "created_at": m.created_at.isoformat()
-    } for m in models]
-
-@app.get("/models/{model_id}", summary="Get detailed health of a model")
-def get_model_details(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Get all fields of a specific model by ID.
-    """
-    check_and_recover_all_stale_jobs_for_user(current_user.id, db)
-    model = verify_model_access(db, current_user, model_id)
-    return {
-        "model_id": model.model_id,
-        "drift_threshold": model.drift_threshold,
-        "status": model.status,
-        "accuracy": model.accuracy,
-        "version": model.version,
-        "features": json.loads(model.features_json),
-        "reference_data_path": model.reference_data_path,
-        "retrain_webhook_url": model.retrain_webhook_url,
-        "created_at": model.created_at.isoformat()
-    }
-
-@app.get("/models/{model_id}/versions", summary="Get version history of a model")
-def get_model_versions(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Retrieves the complete registered version history for a given model.
-    """
-    model = verify_model_access(db, current_user, model_id)
-
-    versions = db.query(DBModelVersion)\
-                 .filter(DBModelVersion.model_id == model_id, DBModelVersion.project_id == model.project_id)\
-                 .order_by(DBModelVersion.created_at.desc())\
-                 .all()
-    if not versions:
-        return [{"version": model.version, "status": "champion", "accuracy": model.accuracy}]
-    return [{
-        "version": v.version,
-        "status": v.status,
-        "accuracy": v.accuracy
-    } for v in versions]
-
-@app.post("/models/{model_id}/rollback", summary="Roll back model to a specified previous version")
-def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Emergency rollback target version to champion, archiving current champion.
-    """
-    model = verify_model_access(db, current_user, model_id)
-        
-    # Locate target version in model registry
-    target_ver = db.query(DBModelVersion).filter(
-        DBModelVersion.model_id == model_id,
-        DBModelVersion.project_id == model.project_id,
-        DBModelVersion.version == req.target_version
-    ).first()
-    
-    if not target_ver:
-        raise HTTPException(status_code=404, detail=f"Target version {req.target_version} not found in registry.")
-        
-    if target_ver.status == "champion":
-        raise HTTPException(status_code=400, detail=f"Target version {req.target_version} is already the current champion.")
-
-    # Load previous model artifact and restore (Verify artifact exists and loads before DB changes)
-    # Use settings.ARTIFACT_ROOT so server and SDK resolve to the same directory.
-    artifact_path = os.path.join(settings.ARTIFACT_ROOT, str(model.project_id), model_id, f"version_{target_ver.version}.pkl")
-    if not os.path.exists(artifact_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Rollback failed: Model artifact file for version {target_ver.version} not found on disk at {artifact_path}."
-        )
-        
-    try:
-        import joblib
-        loaded_artifact = joblib.load(artifact_path)
-        # FIX: Reject placeholder sentinel artifacts written by /register at model
-        # creation time. A sentinel is a dict with placeholder=True — it is not a
-        # real trained model and cannot be safely used in production. The rollback
-        # endpoint must only allow artifacts that were produced by an actual training
-        # run. Returning 404 is consistent with the test contract: no real artifact
-        # exists for this version yet.
-        if isinstance(loaded_artifact, dict) and loaded_artifact.get("placeholder") is True:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Rollback failed: Model artifact file for version {target_ver.version} not found on disk at {artifact_path}."
-            )
-        print(f"[Rollback] Successfully validated previous model artifact: {artifact_path}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Rollback failed: Model artifact file for version {target_ver.version} is corrupted or cannot be loaded: {str(e)}."
-        )
-        
-    # The displaced champion is marked 'archived' — the same status used for
-    # versions superseded by normal promotion. The rollback event itself is
-    # recorded in the audit log (event_type='rollback'), which is the definitive
-    # record of what triggered the status change.
-    # Note: We use 'archived' (not 'rolled_back') here so that the version
-    # registry has a single consistent meaning for non-champion versions.
-    # The audit log event_type='rollback' already captures the full context.
-    displaced_champion_version = model.version  # capture before model.version changes
-    db.query(DBModelVersion).filter(
-        DBModelVersion.model_id == model_id,
-        DBModelVersion.project_id == model.project_id,
-        DBModelVersion.status == "champion"
-    ).update({"status": "archived"})
-
-    # Promote target version to champion
-    target_ver.status = "champion"
-    
-    # Update the primary model settings
-    old_version = model.version
-    old_accuracy = model.accuracy
-    
-    model.version = target_ver.version
-    model.accuracy = target_ver.accuracy
-    model.status = "healthy"
-    
-    # Write rollback/reversion audit entry
-    db.add(DBAuditLogEntry(
-        project_id=model.project_id,
-        model_id=model_id,
-        event_type="rollback",
-        model_version=target_ver.version,
-        drift_score=0.0,
-        triggered_by="manual",
-        details_json=json.dumps({
-            "message": f"Emergency rollback initiated. Reverted model version from {old_version} to {target_ver.version}.",
-            "old_version": old_version,
-            "new_version": target_ver.version,
-            "old_accuracy": old_accuracy,
-            "new_accuracy": target_ver.accuracy
-        })
-    ))
-    
-    db.commit()
-    
-    # Update metrics
-    if target_ver.accuracy is not None:
-        accuracy_gauge.labels(model_id=model_id, version=target_ver.version).set(target_ver.accuracy)
-    
-    send_alert(
-        event_type="rollback",
-        message=f"CRITICAL: Emergency rollback initiated for model '{model_id}'! Reverted from v{old_version} to v{target_ver.version}.",
-        details={
-            "model_id": model_id,
-            "old_version": old_version,
-            "new_version": target_ver.version,
-            "old_accuracy": f"{old_accuracy:.4f}" if old_accuracy is not None else "N/A",
-            "new_accuracy": f"{target_ver.accuracy:.4f}" if target_ver.accuracy is not None else "N/A",
-            "action": "reverted_to_champion"
-        }
-    )
-    
-    return {
-        "status": "rolled_back",
-        "model_id": model_id,
-        "previous_version": old_version,
-        "current_version": target_ver.version
-    }
-
-@app.get("/retraining/history/{model_id}", summary="Get retraining events timeline")
-def get_retraining_history(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Exposes full retraining executions details.
-    """
-    model = verify_model_access(db, current_user, model_id)
-
-    events = db.query(DBRetrainingEvent)\
-               .filter(DBRetrainingEvent.model_id == model_id, DBRetrainingEvent.project_id == model.project_id)\
-               .order_by(DBRetrainingEvent.start_time.desc())\
-               .all()
-    if not events:
-        return []
-
-    return [{
-        "id": e.id,
-        "model_id": e.model_id,
-        "status": e.status,
-        "triggered_by": e.triggered_by,
-        "start_time": e.start_time.isoformat(),
-        "end_time": e.end_time.isoformat() if e.end_time else None,
-        "old_accuracy": e.old_accuracy,
-        "new_accuracy": e.new_accuracy,
-        "old_version": e.old_version,
-        "new_version": e.new_version,
-        "details": json.loads(e.details_json)
-    } for e in events]
-
-@app.get("/audit/{model_id}", summary="Fetch governance audit log entries")
-def get_audit_logs(model_id: str, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    """
-    Returns structured audit entries.
-    """
-    model = verify_model_access(db, current_user, model_id)
-
-    logs = db.query(DBAuditLogEntry)\
-             .filter(DBAuditLogEntry.model_id == model_id, DBAuditLogEntry.project_id == model.project_id)\
-             .order_by(DBAuditLogEntry.timestamp.desc())\
-             .all()
-             
-    if not logs:
-        return []
-
-    return [{
-        "timestamp": log.timestamp.isoformat(),
-        "event_type": log.event_type,
-        "model_id": log.model_id,
-        "model_version": log.model_version,
-        "drift_score": log.drift_score,
-        "triggered_by": log.triggered_by,
-        "details": json.loads(log.details_json)
-    } for log in logs]
 
 def check_and_recover_all_stale_jobs_for_user(user_id: int, db: Session):
     timeout_limit = datetime.datetime.now(ZoneInfo("Asia/Kolkata")) - datetime.timedelta(seconds=300)
@@ -1352,68 +942,8 @@ def complete_retraining(model_id: str, req: RetrainCompleteRequest, current_user
         ))
         db.commit()
 
-        send_alert(
-            event_type="validation_failed",
-            message=f"SDK callback: challenger for '{model_id}' rejected. Champion retained.",
-            details={"model_id": model_id, "reason": req.error or "N/A", "source": "sdk_callback"},
-        )
 
-        return {
-            "status": "rejected",
-            "model_id": model_id,
-            "reason": req.error or "Challenger did not pass validation.",
-        }
-
-@app.post("/evidently/calculate", summary="Isolated Evidently calculations REST endpoint")
-def calculate_evidently_drift_endpoint(req: EvidentlyCalculateRequest):
-    """
-    Computes statistical data drift using local evidently packages.
-    Runs inside the isolated Evidently service container.
-    """
-    try:
-        import pandas as pd
-        ref_df = pd.DataFrame(req.reference_data)
-        cur_df = pd.DataFrame(req.current_data)
-        
-        # Avoid direct circular import, run Evidently local report
-        from driftguard.drift_detector import EVIDENTLY_AVAILABLE
-        if not EVIDENTLY_AVAILABLE:
-            raise HTTPException(status_code=500, detail="Evidently library not installed inside this container.")
-            
-        from driftguard.drift_detector import Report, DataDriftPreset, TargetDriftPreset
-        metrics = [DataDriftPreset()]
-        if req.target_column and req.target_column in ref_df.columns:
-            metrics.append(TargetDriftPreset())
-            
-        report = Report(metrics=metrics)
-        report.run(reference_data=ref_df, current_data=cur_df)
-        result = report.as_dict()
-        
-        drift_metrics = {}
-        overall_drift_detected = False
-        drift_data = result["metrics"][0]["result"]
-        for feature, detail in drift_data["drift_by_columns"].items():
-            drift_score = detail["drift_score"]
-            drift_detected = detail["drift_detected"]
-            if drift_detected:
-                overall_drift_detected = True
-            drift_metrics[feature] = {
-                "drift_score": float(drift_score),
-                "drift_detected": bool(drift_detected),
-                "metric_name": detail["test_name"]
-            }
-            
-        scores = [v["drift_score"] for v in drift_metrics.values()]
-        overall_drift_score = float(np.mean(scores)) if scores else 0.0
-        
-        return {
-            "drift_detected": overall_drift_detected,
-            "metrics": drift_metrics,
-            "overall_drift_score": overall_drift_score
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Evidently computation error: {str(e)}")
-
+# Prometheus metrics scraping endpoint kept locally
 @app.get("/metrics", summary="Scrapes Prometheus metrics format")
 def metrics():
     """
@@ -1756,3 +1286,16 @@ def startup_event():
     import threading
     worker = threading.Thread(target=kafka_consumer_loop, daemon=True, name="KafkaConsumerWorker")
     worker.start()
+
+# ----------------------------------------------------
+# ROUTER REGISTRATION (Delayed to prevent circular imports)
+# ----------------------------------------------------
+from routers import auth, projects, models, telemetry, retraining, audit, evidently
+
+app.include_router(auth.router)
+app.include_router(projects.router)
+app.include_router(models.router)
+app.include_router(telemetry.router)
+app.include_router(retraining.router)
+app.include_router(audit.router)
+app.include_router(evidently.router)
