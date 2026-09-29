@@ -15,7 +15,7 @@ try:
     predictions_counter = Counter(
         "driftguard_predictions_total",
         "Total predictions served by DriftGuard",
-        ["model_id"]
+        ["model_id", "model_version", "deployment_stage"]
     )
     drift_gauge = Gauge(
         "driftguard_drift_score",
@@ -35,7 +35,12 @@ try:
     latency_histogram = Histogram(
         "driftguard_inference_latency_seconds",
         "Inference latency duration in seconds",
-        ["model_id"]
+        ["model_id", "model_version", "deployment_stage"]
+    )
+    errors_counter = Counter(
+        "driftguard_prediction_errors_total",
+        "Total model prediction errors",
+        ["model_id", "model_version", "deployment_stage"]
     )
 except ValueError:
     # Handle duplicate registration errors in local dev/tests cleanly
@@ -45,6 +50,7 @@ except ValueError:
     accuracy_gauge = REGISTRY._names_to_collectors.get("driftguard_model_accuracy")
     retrain_counter = REGISTRY._names_to_collectors.get("driftguard_retraining_triggered_total")
     latency_histogram = REGISTRY._names_to_collectors.get("driftguard_inference_latency_seconds")
+    errors_counter = REGISTRY._names_to_collectors.get("driftguard_prediction_errors_total")
 
 def log_telemetry_metrics(
     model_id: str,
@@ -52,11 +58,13 @@ def log_telemetry_metrics(
     prediction_values: List[float],
     drift_score: float,
     latency_seconds: float = 0.0,
-    model_version: str = "1.0.0"
+    model_version: str = "1.0.0",
+    deployment_stage: str = "champion",
+    is_error: bool = False
 ):
     """
     Shorthand helper to update all live Prometheus metrics on a single prediction event.
-    
+
     Args:
         model_id: Target model ID string.
         feature_values: Input features list.
@@ -64,19 +72,36 @@ def log_telemetry_metrics(
         drift_score: Computed concept drift score.
         latency_seconds: Recorded predict execution duration.
         model_version: Active model version label.
+        deployment_stage: Active deployment stage (champion/canary).
+        is_error: Whether the prediction resulted in an error.
     """
     try:
         # Increment prediction counters
-        predictions_counter.labels(model_id=model_id).inc()
-        
+        predictions_counter.labels(
+            model_id=model_id,
+            model_version=model_version,
+            deployment_stage=deployment_stage
+        ).inc()
+
+        if is_error:
+            errors_counter.labels(
+                model_id=model_id,
+                model_version=model_version,
+                deployment_stage=deployment_stage
+            ).inc()
+
         # Log drift scores per feature
         for idx, val in enumerate(feature_values):
             drift_gauge.labels(model_id=model_id, feature_index=str(idx)).set(drift_score)
-            
+
         # Log latency if provided
         if latency_seconds > 0:
-            latency_histogram.labels(model_id=model_id).observe(latency_seconds)
-            
+            latency_histogram.labels(
+                model_id=model_id,
+                model_version=model_version,
+                deployment_stage=deployment_stage
+            ).observe(latency_seconds)
+
     except Exception as e:
         logger.warning(f"Failed to log metrics bridge: {e}")
 

@@ -42,7 +42,7 @@ class DriftGuard:
     ):
         """
         Initialize the DriftGuard tracker.
-        
+
         Args:
             model_id: Unique string identifier for the model.
             api_url: Address of the DriftGuard API. Defaults to environment config.
@@ -55,7 +55,7 @@ class DriftGuard:
         self.model_id = model_id
         self.api_url = (api_url or settings.API_URL).rstrip("/")
         self.api_key = api_key or os.getenv("DRIFTGUARD_API_KEY")
-        
+
         proj_env = os.getenv("DRIFTGUARD_PROJECT_ID")
         self.project_id = project_id if project_id is not None else (int(proj_env) if proj_env else None)
         self.drift_threshold = drift_threshold if drift_threshold is not None else settings.DRIFT_THRESHOLD
@@ -85,15 +85,11 @@ class DriftGuard:
                     resp = client.get(f"{self.api_url}/models/{self.model_id}", headers=headers)
                     if resp.status_code == 200:
                         version = resp.json().get("version", "1.0.0")
-                        file_path = os.path.join(
-                            settings.ARTIFACT_ROOT,
-                            str(self.project_id),
-                            self.model_id,
-                            f"version_{version}.pkl"
-                        )
-                        if os.path.exists(file_path):
-                            self._champion_model = joblib.load(file_path)
-                            logger.info(f"[{self.model_id}] Auto-restored champion model version {version} from {file_path}")
+                        from driftguard.artifact_store import get_artifact_store
+                        store = get_artifact_store(settings.ARTIFACT_ROOT)
+                        if store.exists(str(self.project_id), self.model_id, version):
+                            self._champion_model = store.load(str(self.project_id), self.model_id, version)
+                            logger.info(f"[{self.model_id}] Auto-restored champion model version {version} from ArtifactStore")
             except Exception as e:
                 logger.debug(f"[{self.model_id}] Could not auto-restore champion model: {e}")
 
@@ -150,24 +146,28 @@ class DriftGuard:
         except Exception as e:
             logger.warning(f"[{self.model_id}] Failed to explicitly register model: {e}")
 
-    def wrap(self, model: Any, feature_extractor: Optional[Callable] = None) -> "DriftGuardModelWrapper":
+    def wrap(self, model: Any, feature_extractor: Optional[Callable] = None, deployment_stage: str = "champion", model_version: str = None) -> "DriftGuardModelWrapper":
         """
         Wrap any machine learning model to automatically track its inputs and outputs.
 
         Args:
             model: An arbitrary model instance (scikit-learn, PyTorch, HuggingFace, etc.)
             feature_extractor: Optional callback to convert inputs (text, images, categoricals) to numerical arrays for drift detection.
+            deployment_stage: Stage of this model ("champion" or "canary").
+            model_version: Version of this model (defaults to tracker.version).
 
         Returns:
             A DriftGuardModelWrapper interceptor.
         """
+        version_to_use = model_version if model_version is not None else self.version
+
         # 1. Determine model feature count
         num_features = 5  # default/fallback feature count
         if hasattr(model, "n_features_in_"):
             num_features = getattr(model, "n_features_in_")
         elif hasattr(model, "num_features"):
             num_features = getattr(model, "num_features")
-        
+
         feature_names = [f"feature_{i}" for i in range(num_features)]
 
         # 2. Register model
@@ -181,7 +181,7 @@ class DriftGuard:
                 pass
 
         # 4. Return wrapped model
-        return DriftGuardModelWrapper(model, self, feature_extractor)
+        return DriftGuardModelWrapper(model, self, feature_extractor, deployment_stage, version_to_use)
 
     # ------------------------------------------------------------------
     # Callback registration API
@@ -248,17 +248,10 @@ class DriftGuard:
                                 version = resp.json().get("version", "1.0.0")
                     except Exception:
                         pass
-                # Use absolute ARTIFACT_ROOT so artifacts are written to the same
-                # location regardless of the script's working directory.
-                dir_path = os.path.join(
-                    settings.ARTIFACT_ROOT,
-                    str(self.project_id),
-                    self.model_id
-                )
-                os.makedirs(dir_path, exist_ok=True)
-                file_path = os.path.join(dir_path, f"version_{version}.pkl")
-                joblib.dump(model, file_path)
-                logger.info(f"[{self.model_id}] Persisted champion model to {file_path}")
+                from driftguard.artifact_store import get_artifact_store
+                store = get_artifact_store(settings.ARTIFACT_ROOT)
+                store.save(model, str(self.project_id), self.model_id, version)
+                logger.info(f"[{self.model_id}] Persisted champion model to ArtifactStore")
             except Exception as e:
                 logger.warning(f"[{self.model_id}] Failed to persist champion model: {e}")
 
@@ -281,7 +274,7 @@ class DriftGuard:
             f"{len(self._validation_features)} samples."
         )
 
-    def _send_telemetry_async(self, features: list, prediction: list, drift_score: float):
+    def _send_telemetry_async(self, features: list, prediction: list, drift_score: float, deployment_stage: str, model_version: str, is_error: bool = False):
         """
         Puts telemetry payload onto the queue for asynchronous logging.
         Drops data under queue overflow to prevent latency spikes in the prediction loop.
@@ -294,9 +287,12 @@ class DriftGuard:
             "api_key": self.api_key,
             "features": features,
             "prediction": prediction,
-            "drift_score": drift_score
+            "drift_score": drift_score,
+            "deployment_stage": deployment_stage,
+            "model_version": model_version,
+            "is_error": is_error
         }
-        
+
         if self._kafka_producer:
             try:
                 self._kafka_producer.produce('driftguard-telemetry', value=json.dumps(payload).encode('utf-8'))
@@ -326,7 +322,7 @@ class DriftGuard:
         """
         headers = {"X-API-Key": self.api_key} if self.api_key else {}
         url = f"{self.api_url}/predict/{self.model_id}"
-        
+
         client = httpx.Client(timeout=5.0)
         try:
             while not self._telemetry_stop_event.is_set() or not self._telemetry_queue.empty():
@@ -335,7 +331,7 @@ class DriftGuard:
                     payload = self._telemetry_queue.get(timeout=0.2)
                 except queue.Empty:
                     continue
-                
+
                 # Attempt to upload telemetry with retry logic
                 success = False
                 terminal_fail = False
@@ -363,7 +359,7 @@ class DriftGuard:
                     except Exception as err:
                         print(f"[DriftGuard SDK] Telemetry error: {err}. Attempt {attempt + 1}/5")
                     time.sleep(0.05 * (attempt + 1))  # exponential backoff
-                
+
                 if not success and not terminal_fail:
                     self.telemetry_failed += 1
                 self._telemetry_queue.task_done()
@@ -383,13 +379,13 @@ class DriftGuard:
         """
         if self._is_shutdown:
             return
-            
+
         logger.info(f"[{self.model_id}] Initiating graceful SDK telemetry shutdown...")
         self._is_shutdown = True
-        
+
         # Signal stop event
         self._telemetry_stop_event.set()
-        
+
         if self._telemetry_worker.is_alive():
             logger.info(f"[{self.model_id}] Flushing telemetry queue ({self._telemetry_queue.qsize()} items) and waiting for worker thread...")
             self._telemetry_worker.join(timeout=timeout)
@@ -397,7 +393,7 @@ class DriftGuard:
                 logger.warning(f"[{self.model_id}] Telemetry worker did not stop within {timeout}s timeout.")
             else:
                 logger.info(f"[{self.model_id}] Telemetry worker stopped successfully.")
-                
+
         if self._kafka_producer:
             self._kafka_producer.flush(timeout=timeout)
             logger.info(f"[{self.model_id}] Kafka Producer flushed successfully.")
@@ -495,26 +491,36 @@ class DriftGuardModelWrapper:
     """
     Model interceptor wrapping target models and forwarding calls while computing drift metrics.
     """
-    def __init__(self, model: Any, tracker: DriftGuard, feature_extractor: Optional[Callable] = None):
+    def __init__(self, model: Any, tracker: DriftGuard, feature_extractor: Optional[Callable] = None, deployment_stage: str = "champion", model_version: str = "1.0.0"):
         self._model = model
         self._tracker = tracker
         self._feature_extractor = feature_extractor
+        self._deployment_stage = deployment_stage
+        self._model_version = model_version
 
     def predict(self, features: Any, *args, **kwargs) -> Any:
         """
         Intercept standard scikit-learn/sklearn predict calls.
         """
-        prediction = self._forward_predict(features, *args, **kwargs)
-        self._track(features, prediction)
-        return prediction
+        try:
+            prediction = self._forward_predict(features, *args, **kwargs)
+            self._track(features, prediction, is_error=False)
+            return prediction
+        except Exception as e:
+            self._track(features, [0.0], is_error=True)
+            raise e
 
     def __call__(self, features: Any, *args, **kwargs) -> Any:
         """
         Intercept direct callable objects (e.g., PyTorch models, HuggingFace pipelines).
         """
-        prediction = self._forward_call(features, *args, **kwargs)
-        self._track(features, prediction)
-        return prediction
+        try:
+            prediction = self._forward_call(features, *args, **kwargs)
+            self._track(features, prediction, is_error=False)
+            return prediction
+        except Exception as e:
+            self._track(features, [0.0], is_error=True)
+            raise e
 
     def predict_proba(self, features: Any, *args, **kwargs) -> Any:
         """
@@ -541,7 +547,7 @@ class DriftGuardModelWrapper:
         else:
             raise AttributeError("Wrapped model does not have a predict method or __call__ function.")
 
-    def _track(self, features: Any, prediction: Any):
+    def _track(self, features: Any, prediction: Any, is_error: bool = False):
         """
         Tracks prediction request details, runs ADWIN checks and notifies platform.
         """
@@ -558,7 +564,7 @@ class DriftGuardModelWrapper:
             # If flat 1D, make it 2D (batch of 1)
             if feat_arr.ndim == 1:
                 feat_arr = feat_arr.reshape(1, -1)
-                
+
             try:
                 pred_arr = self._to_numpy_array(prediction)
                 if pred_arr.ndim == 0 or pred_arr.ndim == 1:
@@ -599,7 +605,10 @@ class DriftGuardModelWrapper:
             self._tracker._send_telemetry_async(
                 features=feat_arr[0].tolist(),
                 prediction=pred_list,
-                drift_score=drift_score
+                drift_score=drift_score,
+                deployment_stage=self._deployment_stage,
+                model_version=self._model_version,
+                is_error=is_error
             )
 
             # 4. Check for drift threshold breach
@@ -632,7 +641,7 @@ class DriftGuardModelWrapper:
         # PyTorch Tensor check
         if hasattr(data, "detach") and hasattr(data, "cpu"):
             data = data.detach().cpu().numpy()
-            
+
         # Pandas DataFrame check
         if hasattr(data, "values"):
             data = data.values

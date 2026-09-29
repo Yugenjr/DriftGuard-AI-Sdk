@@ -100,19 +100,12 @@ class RetrainerCallbackRunner:
             # Persist challenger model before promotion
             if self.tracker.project_id:
                 try:
-                    import joblib
-                    import os
-                    from driftguard.config import settings as _settings
-                    dir_path = os.path.join(
-                        _settings.ARTIFACT_ROOT,
-                        str(self.tracker.project_id),
-                        self.model_id
-                    )
-                    os.makedirs(dir_path, exist_ok=True)
-                    file_path = os.path.join(dir_path, f"version_{new_version}.pkl")
-                    joblib.dump(challenger_model, file_path)
-                    print(f"PERSISTED CHALLENGER MODEL TO {file_path}")
-                    logger.info(f"[{self.model_id}] Persisted challenger model before promotion to {file_path}")
+                    from driftguard.artifact_store import get_artifact_store
+                    from driftguard.config import SDKConfig as _settings
+                    store = get_artifact_store(_settings.ARTIFACT_ROOT)
+                    store.save(challenger_model, str(self.tracker.project_id), self.model_id, new_version)
+                    print(f"PERSISTED CHALLENGER MODEL TO ArtifactStore")
+                    logger.info(f"[{self.model_id}] Persisted challenger model before promotion to ArtifactStore")
                 except Exception as e:
                     print(f"FAILED TO PERSIST CHALLENGER MODEL: {e}")
                     logger.warning(f"[{self.model_id}] Failed to persist challenger model: {e}")

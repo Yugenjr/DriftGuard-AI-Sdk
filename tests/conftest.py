@@ -23,6 +23,8 @@ def configure_test_env():
     Ensures environment variables and folders are adjusted for clean, isolated tests.
     """
     os.environ["WANDB_MODE"] = "offline"
+    os.environ["ALLOW_SIMULATED_CANARY"] = "true"
+    os.environ["USE_PROMETHEUS_CANARY"] = "false"
     os.environ["WANDB_API_KEY"] = ""
     os.environ["DRIFTGUARD_DRIFT_THRESHOLD"] = "0.15"
 

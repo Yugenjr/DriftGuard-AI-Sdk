@@ -69,12 +69,10 @@ def register_model(req: RegisterModelRequest, current_user: DBUser = Depends(get
     # Persist a placeholder v1.0.0 artifact on disk so rollback to the initial
     # version is always possible — even before the SDK sends a real champion model.
     try:
-        import joblib as _joblib
-        _art_dir = os.path.join(settings.ARTIFACT_ROOT, str(proj_id), req.model_id)
-        os.makedirs(_art_dir, exist_ok=True)
-        _art_path = os.path.join(_art_dir, f"version_{req.version}.pkl")
-        if not os.path.exists(_art_path):
-            _joblib.dump({"model_id": req.model_id, "version": req.version, "placeholder": True}, _art_path)
+        from driftguard.artifact_store import get_artifact_store
+        store = get_artifact_store(settings.ARTIFACT_ROOT)
+        if not store.exists(str(proj_id), req.model_id, req.version):
+            store.save({"model_id": req.model_id, "version": req.version, "placeholder": True}, str(proj_id), req.model_id, req.version)
     except Exception as _art_err:
         pass
     
@@ -131,12 +129,10 @@ def register_model_explicit(req: ExplicitRegisterModelRequest, current_user: DBU
     db.commit()
 
     try:
-        import joblib as _joblib
-        _art_dir = os.path.join(settings.ARTIFACT_ROOT, str(proj_id), req.model_id)
-        os.makedirs(_art_dir, exist_ok=True)
-        _art_path = os.path.join(_art_dir, f"version_{req.version}.pkl")
-        if not os.path.exists(_art_path):
-            _joblib.dump({"model_id": req.model_id, "version": req.version, "placeholder": True}, _art_path)
+        from driftguard.artifact_store import get_artifact_store
+        store = get_artifact_store(settings.ARTIFACT_ROOT)
+        if not store.exists(str(proj_id), req.model_id, req.version):
+            store.save({"model_id": req.model_id, "version": req.version, "placeholder": True}, str(proj_id), req.model_id, req.version)
     except Exception as _art_err:
         pass
 
@@ -229,20 +225,21 @@ def rollback_model_version(model_id: str, req: RollbackRequest, current_user: DB
     if target_ver.status == "champion":
         raise HTTPException(status_code=400, detail=f"Target version {req.target_version} is already the current champion.")
 
-    artifact_path = os.path.join(settings.ARTIFACT_ROOT, str(model.project_id), model_id, f"version_{target_ver.version}.pkl")
-    if not os.path.exists(artifact_path):
+    from driftguard.artifact_store import get_artifact_store
+    store = get_artifact_store(settings.ARTIFACT_ROOT)
+
+    if not store.exists(str(model.project_id), model_id, target_ver.version):
         raise HTTPException(
             status_code=404,
-            detail=f"Rollback failed: Model artifact file for version {target_ver.version} not found on disk at {artifact_path}."
+            detail=f"Rollback failed: Model artifact file for version {target_ver.version} not found in artifact store."
         )
         
     try:
-        import joblib
-        loaded_artifact = joblib.load(artifact_path)
+        loaded_artifact = store.load(str(model.project_id), model_id, target_ver.version)
         if isinstance(loaded_artifact, dict) and loaded_artifact.get("placeholder") is True:
             raise HTTPException(
                 status_code=404,
-                detail=f"Rollback failed: Model artifact file for version {target_ver.version} not found on disk at {artifact_path}."
+                detail=f"Rollback failed: Model artifact for version {target_ver.version} is a placeholder and cannot be used for rollback."
             )
     except HTTPException:
         raise

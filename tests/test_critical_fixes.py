@@ -272,7 +272,7 @@ def test_rollback_corrupted_artifact_rejection():
             "target_version": "1.0.0"
         }, headers=headers)
         assert rollback_resp.status_code == 404
-        assert "not found on disk" in rollback_resp.json()["detail"]
+        assert "cannot be used for rollback" in rollback_resp.json()["detail"]
 
         # Current version is still 1.0.1
         model_details = client.get("/models/rollback-check", headers=headers).json()

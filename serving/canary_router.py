@@ -13,22 +13,34 @@ from governance.audit_log import write_audit_entry
 
 logger = logging.getLogger("DriftGuard.CanaryRouter")
 
-def get_canary_split_weight() -> float:
+def get_canary_split_weight(model_id: str = "default") -> float:
     """
-    Parses active canary weight split from environment.
+    Parses active canary weight split from Redis.
     
     Returns:
         A float weight between 0.0 and 1.0 representing Challenger's traffic portion.
     """
-    # Check environment override
-    weight_str = os.getenv("DRIFTGUARD_CANARY_SPLIT", "")
-    if not weight_str:
-        return settings.CANARY_INITIAL_WEIGHT
     try:
-        weight = float(weight_str)
-        return max(0.0, min(1.0, weight))
-    except ValueError:
-        return settings.CANARY_INITIAL_WEIGHT
+        import redis
+        r = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", 6379)), db=0, socket_connect_timeout=2.0)
+        val = r.get(f"canary_split_{model_id}")
+        if val is not None:
+            return max(0.0, min(1.0, float(val)))
+        return 0.0
+    except Exception as e:
+        if os.getenv("ALLOW_SIMULATED_CANARY") == "true":
+            # Check environment override fallback (only for tests)
+            weight_str = os.getenv("DRIFTGUARD_CANARY_SPLIT", "")
+            if weight_str:
+                try:
+                    weight = float(weight_str)
+                    return max(0.0, min(1.0, weight))
+                except ValueError:
+                    pass
+            return settings.CANARY_INITIAL_WEIGHT
+
+        logger.error(f"FATAL: Failed to read canary split from Redis for {model_id}: {e}")
+        raise RuntimeError(f"Canary routing failed: Redis state unavailable. {e}")
 
 def route_canary_prediction(
     features: Any,
@@ -51,7 +63,7 @@ def route_canary_prediction(
     Returns:
         Tuple of (prediction, selected_model_name)
     """
-    challenger_weight = get_canary_split_weight()
+    challenger_weight = get_canary_split_weight(model_id)
     
     # 1. Decide route route
     rand_val = random.random()

@@ -175,18 +175,18 @@ class DBModelVersion(Base):
 try:
     from sqlalchemy import inspect, text
     inspector = inspect(engine)
-    
+
     # 1. Inspect existing tables
     has_models_table = inspector.has_table("dg_models")
     has_old_table = inspector.has_table("dg_models_old")
     needs_composite_migration = False
-    
+
     if has_models_table:
         pk_constraint = inspector.get_pk_constraint("dg_models")
         pk_cols = pk_constraint.get("constrained_columns", [])
         if len(pk_cols) == 1 and "project_id" not in pk_cols:
             needs_composite_migration = True
-            
+
     with engine.begin() as conn:
         # Drop old conflicting index on dg_models_old if it exists
         if has_old_table:
@@ -194,7 +194,7 @@ try:
                 conn.execute(text("DROP INDEX IF EXISTS ix_dg_models_model_id;"))
             except Exception as index_err:
                 print(f"[Migration] Warning dropping leftover index: {index_err}")
-                
+
         # 2. If dg_models has single-column PK, rename it so Base.metadata.create_all creates the new composite key version
         if needs_composite_migration:
             print("[Migration] Renaming old single-key dg_models to dg_models_old for composite key migration...")
@@ -204,10 +204,10 @@ try:
                 print(f"[Migration] Warning dropping index: {index_err}")
             conn.execute(text("ALTER TABLE dg_models RENAME TO dg_models_old;"))
             has_old_table = True
-            
+
     # 3. Create all tables (will create new dg_models and create new tables if missing)
     Base.metadata.create_all(bind=engine)
-    
+
     with engine.begin() as conn:
         # 4. If we have dg_models_old, copy over the data to the newly created composite-key version
         if has_old_table:
@@ -222,7 +222,7 @@ try:
                 print("[Migration] dg_models composite key migration completed successfully.")
             except Exception as copy_err:
                 print(f"[Migration] Error completing copy from dg_models_old: {copy_err}")
-            
+
         # 5. Check and append project_id / last_heartbeat columns for event log tables
         for table_name in ["dg_predictions", "dg_retraining_events", "dg_audit_logs", "dg_model_versions"]:
             if inspector.has_table(table_name):
@@ -230,14 +230,14 @@ try:
                 if "project_id" not in cols:
                     print(f"[Migration] Adding project_id column to {table_name}...")
                     conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN project_id INTEGER DEFAULT 1;"))
-                    
+
         # 6. Add last_heartbeat column to dg_retraining_events
         if inspector.has_table("dg_retraining_events"):
             cols = [c["name"] for c in inspector.get_columns("dg_retraining_events")]
             if "last_heartbeat" not in cols:
                 print("[Migration] Adding last_heartbeat column to dg_retraining_events...")
                 conn.execute(text("ALTER TABLE dg_retraining_events ADD COLUMN last_heartbeat TIMESTAMP;"))
-                
+
     # 7. Add retrain_webhook_url column to dg_models
         if inspector.has_table("dg_models"):
             cols = [c["name"] for c in inspector.get_columns("dg_models")]
@@ -268,7 +268,7 @@ try:
                 f"[STARTUP] Default admin user created. API Key: {default_key} "
                 "— Set DRIFTGUARD_DEFAULT_API_KEY in .env to make this persistent."
             )
-            
+
         default_project = db.query(DBProject).filter(DBProject.owner_id == default_user.id).first()
         if not default_project:
             default_project = DBProject(
@@ -278,7 +278,7 @@ try:
             db.add(default_project)
             db.commit()
             db.refresh(default_project)
-            
+
         # Migrate any models with null project_id/owner_id
         null_models = db.query(DBModel).filter((DBModel.project_id == None) | (DBModel.owner_id == None)).all()
         for m in null_models:
@@ -287,7 +287,7 @@ try:
         if null_models:
             db.commit()
             print(f"Migrated {len(null_models)} existing models to Default Project.")
-            
+
     finally:
         db.close()
 except Exception as e:
@@ -299,7 +299,7 @@ except Exception as e:
 predictions_counter = Counter(
     "driftguard_predictions_total",
     "Total predictions served by DriftGuard",
-    ["model_id"]
+    ["model_id", "model_version", "deployment_stage"]
 )
 drift_gauge = Gauge(
     "driftguard_drift_score",
@@ -319,7 +319,12 @@ retrain_counter = Counter(
 latency_histogram = Histogram(
     "driftguard_inference_latency_seconds",
     "Inference latency duration in seconds",
-    ["model_id"]
+    ["model_id", "model_version", "deployment_stage"]
+)
+errors_counter = Counter(
+    "driftguard_prediction_errors_total",
+    "Total model prediction errors",
+    ["model_id", "model_version", "deployment_stage"]
 )
 
 # Initialize FastAPI App
@@ -395,6 +400,9 @@ class PredictTelemetryRequest(BaseModel):
     features: List[Any] = Field(..., example=[1.2, 0.4, 9.8])
     prediction: List[Any] = Field(..., example=[1.0])
     drift_score: float = Field(..., example=0.08)
+    model_version: str = Field("1.0.0", example="1.0.5")
+    deployment_stage: str = Field("champion", example="canary")
+    is_error: bool = Field(False, example=False)
 
 class RetrainTriggerRequest(BaseModel):
     drift_score: float = Field(0.15, example=0.21)
@@ -499,11 +507,11 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
     existing = db.query(DBUser).filter(DBUser.email == req.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email is already registered.")
-    
+
     # Generate API key
     api_key = f"dg-{secrets.token_hex(16)}"
     hash_val = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-    
+
     new_user = DBUser(
         email=req.email,
         name=req.name,
@@ -513,7 +521,7 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    
+
     return {
         "id": new_user.id,
         "email": new_user.email,
@@ -528,10 +536,10 @@ def rotate_api_key(current_user: DBUser = Depends(get_current_user), db: Session
     # Generate new API key
     new_key = f"dg-{secrets.token_hex(16)}"
     hash_val = hashlib.sha256(new_key.encode("utf-8")).hexdigest()
-    
+
     db_user.api_key_hash = hash_val
     db.commit()
-    
+
     return {
         "email": db_user.email,
         "api_key": new_key
@@ -615,7 +623,7 @@ def register_model(req: RegisterModelRequest, current_user: DBUser = Depends(get
         existing.reference_data_path = req.reference_data_path
         db.commit()
         return {"status": "updated", "model_id": req.model_id}
-        
+
     new_model = DBModel(
         model_id=req.model_id,
         project_id=proj_id,
@@ -628,7 +636,7 @@ def register_model(req: RegisterModelRequest, current_user: DBUser = Depends(get
         reference_data_path=req.reference_data_path
     )
     db.add(new_model)
-    
+
     # Insert first version as champion in model version registry
     init_version = DBModelVersion(
         project_id=proj_id,
@@ -639,27 +647,25 @@ def register_model(req: RegisterModelRequest, current_user: DBUser = Depends(get
     )
     db.add(init_version)
     db.commit()
-    
+
     # Persist a placeholder v1.0.0 artifact on disk so rollback to the initial
     # version is always possible — even before the SDK sends a real champion model.
     # The server writes this because it owns the artifact directory and always
     # runs from a known CWD (the project root).
     try:
-        import joblib as _joblib
-        _art_dir = os.path.join(settings.ARTIFACT_ROOT, str(proj_id), req.model_id)
-        os.makedirs(_art_dir, exist_ok=True)
-        _art_path = os.path.join(_art_dir, f"version_{req.version}.pkl")
-        if not os.path.exists(_art_path):
+        from driftguard.artifact_store import get_artifact_store
+        store = get_artifact_store(settings.ARTIFACT_ROOT)
+        if not store.exists(str(proj_id), req.model_id, req.version):
             # Write a lightweight sentinel so rollback endpoint can validate the file
-            _joblib.dump({"model_id": req.model_id, "version": req.version, "placeholder": True}, _art_path)
-            print(f"[Register] Wrote initial artifact placeholder to {_art_path}")
+            store.save({"model_id": req.model_id, "version": req.version, "placeholder": True}, str(proj_id), req.model_id, req.version)
+            print(f"[Register] Wrote initial artifact placeholder to ArtifactStore")
     except Exception as _art_err:
         print(f"[Register] Warning: Could not write v{req.version} artifact placeholder: {_art_err}")
-    
+
     # Initialize metrics
     if req.accuracy is not None:
         accuracy_gauge.labels(model_id=req.model_id, version=req.version).set(req.accuracy)
-    
+
     return {"status": "registered", "model_id": req.model_id}
 
 # Remaining routes migrated to routers/
@@ -675,14 +681,14 @@ def check_and_recover_all_stale_jobs_for_user(user_id: int, db: Session):
         DBRetrainingEvent.status == "running",
         DBRetrainingEvent.last_heartbeat < timeout_limit
     ).all()
-    
+
     if stale_events:
         print(f"[Self-Healing] Recovering {len(stale_events)} stale retraining events for user {user_id}...")
         for event in stale_events:
             event.status = "failed"
             event.end_time = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
             event.details_json = json.dumps({"error": "Retraining job timed out/stale. Recovered by watchdog lock resolver."})
-            
+
             db.add(DBAuditLogEntry(
                 project_id=event.project_id,
                 model_id=event.model_id,
@@ -692,7 +698,7 @@ def check_and_recover_all_stale_jobs_for_user(user_id: int, db: Session):
                 triggered_by=event.triggered_by,
                 details_json=json.dumps({"error": "Retraining job timed out/stale. Lock resolved."})
             ))
-            
+
             # Revert model status
             model = db.query(DBModel).filter(
                 DBModel.model_id == event.model_id,
@@ -767,7 +773,7 @@ def trigger_retraining(model_id: str, req: RetrainTriggerRequest, background_tas
                     print(f"[Webhook] Response: {resp.status_code}")
             except Exception as e:
                 print(f"[Webhook] Failed to hit webhook: {e}")
-    
+
         background_tasks.add_task(fire_webhook)
         return {"status": "triggered_webhook", "event_id": event.id, "message": "Webhook fired to orchestrator."}
 
@@ -994,7 +1000,7 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
         event = db.query(DBRetrainingEvent).filter(DBRetrainingEvent.id == event_id).first()
         proj_id = event.project_id if event else 1
         model = db.query(DBModel).filter(DBModel.model_id == model_id, DBModel.project_id == proj_id).first()
-        
+
         if not model:
             print(f"[{model_id}] Model not found in DB, aborting background retraining.")
             return
@@ -1024,15 +1030,7 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
             details={"triggered_by": triggered_by, "baseline_accuracy": _acc_str}
         )
 
-        # 2. Resolve champion artifact path from the artifact store
-        _champion_artifact_path = os.path.join(
-            settings.ARTIFACT_ROOT,
-            str(model.project_id),
-            model_id,
-            f"version_{model.version}.pkl"
-        )
-        print(f"[{model_id}] Champion artifact resolved to: {_champion_artifact_path}")
-
+        # 2. Pipeline will resolve champion artifact from the artifact store using model identifiers
         # 3. Run the pipeline flow steps
         # FIX: Emit a heartbeat before and after the pipeline so the 5-minute
         # watchdog never kills a job that is merely waiting on training I/O.
@@ -1062,8 +1060,7 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 model_id=model_id,
                 current_accuracy=model.accuracy,
                 current_version=model.version,
-                project_id=model.project_id,
-                artifact_path=_champion_artifact_path
+                project_id=model.project_id
             )
         except Exception as pi_err:
             print(f"Pipeline flow execution failed: {pi_err}")
@@ -1089,12 +1086,12 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
             # Model validation succeeded! Promote challenger to champion
             new_acc = pipeline_results.get("new_accuracy", model.accuracy)
             new_ver = pipeline_results.get("new_version", "1.0.1")
-            
+
             # Update Model
             model.status = "healthy"
             model.accuracy = new_acc
             model.version = new_ver
-            
+
             # Archive old champion version in version registry
             db.query(DBModelVersion).filter(
                 DBModelVersion.model_id == model_id,
@@ -1111,7 +1108,7 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 accuracy=new_acc
             )
             db.add(new_version_rec)
-            
+
             # Update Retraining Event
             if event:
                 event.status = "completed"
@@ -1119,10 +1116,10 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
                 event.new_accuracy = new_acc
                 event.new_version = new_ver
                 event.details_json = json.dumps(pipeline_results.get("details", {}))
-            
+
             _old_acc = event.old_accuracy if event else model.accuracy
             _old_acc_str = f"{_old_acc:.4f}" if _old_acc is not None else "N/A"
-            
+
             # Write Promotion Audit Log
             audit_prom = DBAuditLogEntry(
                 project_id=model.project_id,
@@ -1158,7 +1155,7 @@ def run_retraining_process(model_id: str, event_id: int, drift_score: float, tri
         else:
             # Succeeded training but validation failed, or pipeline failed
             model.status = "healthy"  # Revert back to healthy (using original champion model)
-            
+
             if event:
                 event.status = "failed"
                 event.end_time = datetime.datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -1246,12 +1243,12 @@ def kafka_consumer_loop():
         'group.id': 'driftguard-backend-group',
         'auto.offset.reset': 'earliest'
     }
-    
+
     try:
         consumer = Consumer(conf)
         consumer.subscribe(['driftguard-telemetry'])
         print(f"[Kafka] Consumer started on {kafka_brokers}, listening to 'driftguard-telemetry'")
-        
+
         client = httpx.Client(timeout=10.0)
         while True:
             msg = consumer.poll(1.0)
@@ -1260,24 +1257,24 @@ def kafka_consumer_loop():
             if msg.error():
                 print(f"[Kafka] Consumer error: {msg.error()}")
                 continue
-            
+
             # Process Message
             try:
                 payload = json.loads(msg.value().decode('utf-8'))
                 model_id = payload.pop("model_id", None)
                 api_key = payload.pop("api_key", None)
-                
+
                 if not model_id:
                     continue
-                
+
                 # Forward to standard endpoint to reuse all complex logic
                 headers = {"X-API-Key": api_key} if api_key else {}
                 # Post internally to FastAPI
                 client.post(f"http://127.0.0.1:8000/predict/{model_id}", json=payload, headers=headers)
-                
+
             except Exception as e:
                 print(f"[Kafka] Error processing message: {e}")
-                
+
     except Exception as e:
         print(f"[Kafka] Failed to start consumer: {e}")
 
@@ -1291,6 +1288,11 @@ def startup_event():
 # ROUTER REGISTRATION (Delayed to prevent circular imports)
 # ----------------------------------------------------
 from routers import auth, projects, models, telemetry, retraining, audit, evidently
+
+@app.get("/metrics")
+def get_metrics():
+    """Expose Prometheus metrics for production scraping."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 app.include_router(auth.router)
 app.include_router(projects.router)

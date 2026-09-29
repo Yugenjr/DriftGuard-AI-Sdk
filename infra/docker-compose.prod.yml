@@ -84,10 +84,10 @@ services:
       context: ..
       dockerfile: Dockerfile
       args:
-        - REQUIREMENTS_FILE=requirements/api.txt
+        - REQUIREMENTS_FILE=requirements/prod.txt
     container_name: driftguard-mlflow
     restart: always
-    command: mlflow server --backend-store-uri postgresql://driftguard:driftguard@postgres:5432/driftguard --default-artifact-root s3://driftguard-artifacts --host 0.0.0.0 --port 5000
+    command: mlflow server --backend-store-uri postgresql://driftguard:driftguard@postgres:5432/driftguard --default-artifact-root s3://driftguard-prod-artifacts-yugen/mlflow --host 0.0.0.0 --port 5000
     ports:
       - "5000:5000"
     depends_on:
@@ -103,6 +103,7 @@ services:
   # WORKFLOW SCHEDULER (Prefect Server)
   # ----------------------------------------------------
   prefect:
+    profiles: ["full"]
     build:
       context: ..
       dockerfile: Dockerfile
@@ -146,6 +147,7 @@ services:
   # OBSERVABILITY PANELS (Grafana)
   # ----------------------------------------------------
   grafana:
+    profiles: ["full"]
     image: grafana/grafana:10.0.0
     container_name: driftguard-grafana
     restart: always
@@ -163,6 +165,7 @@ services:
   # EVIDENTLY STATISTICAL CALCULATION SERVICE
   # ----------------------------------------------------
   driftguard-evidently:
+    profiles: ["full"]
     build:
       context: ..
       dockerfile: Dockerfile
@@ -185,7 +188,11 @@ services:
   # DRIFTGUARD CORE API GATEWAY
   # ----------------------------------------------------
   driftguard-api:
-    image: yugenjr/driftguard-api:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        - REQUIREMENTS_FILE=requirements/prod.txt
     container_name: driftguard-api
     restart: always
     ports:
@@ -219,6 +226,7 @@ services:
   # DRIFTGUARD OBSIDIAN FRONTEND DASHBOARD
   # ----------------------------------------------------
   driftguard-dashboard:
+    profiles: ["full"]
     image: yugenjr/driftguard-dashboard:latest
     container_name: driftguard-dashboard
     restart: always

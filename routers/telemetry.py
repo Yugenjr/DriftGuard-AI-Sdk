@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from driftguard.alert import send_alert
 from main import (
     get_db, get_current_user, verify_model_access, DBModel, DBProject, DBPredictionLog, DBAuditLogEntry,
-    DBUser, PredictTelemetryRequest, predictions_counter, drift_gauge, latency_histogram
+    DBUser, PredictTelemetryRequest, predictions_counter, drift_gauge, latency_histogram, errors_counter
 )
 
 router = APIRouter(tags=["Telemetry"])
@@ -38,17 +38,25 @@ def log_prediction(model_id: str, req: PredictTelemetryRequest, current_user: DB
     finally:
         db_commit_latency_seconds = time.time() - t0
 
-    predictions_counter.labels(model_id=model_id).inc()
+    labels = {
+        "model_id": model_id,
+        "model_version": req.model_version,
+        "deployment_stage": req.deployment_stage
+    }
+
+    predictions_counter.labels(**labels).inc()
+    if req.is_error:
+        errors_counter.labels(**labels).inc()
 
     for i in range(len(req.features)):
         drift_gauge.labels(model_id=model_id, feature_index=str(i)).set(req.drift_score)
 
-    latency_histogram.labels(model_id=model_id).observe(db_commit_latency_seconds)
+    latency_histogram.labels(**labels).observe(db_commit_latency_seconds)
 
     if req.drift_score > model.drift_threshold and model.status != "retraining":
         model.status = "degraded"
         db.commit()
-        
+
         audit = DBAuditLogEntry(
             project_id=model.project_id,
             model_id=model_id,
@@ -85,7 +93,7 @@ def get_drift_metrics(model_id: str, current_user: DBUser = Depends(get_current_
              .order_by(DBPredictionLog.timestamp.desc())\
              .limit(500)\
              .all()
-             
+
     if not logs:
         return []
 

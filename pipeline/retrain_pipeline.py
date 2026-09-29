@@ -369,8 +369,7 @@ def run_retraining_flow(
     model_id: str,
     current_accuracy: float,
     current_version: str,
-    project_id: int = 1,
-    artifact_path: str = None
+    project_id: int = 1
 ) -> Dict[str, Any]:
     """
     Main orchestrator flow invoked by FastAPI.
@@ -434,30 +433,33 @@ def run_retraining_flow(
     champion_model = None
     champion_loaded_from_artifact = False
 
-    if artifact_path and os.path.exists(artifact_path):
+    from driftguard.artifact_store import get_artifact_store
+    from driftguard.config import SDKConfig as settings
+    store = get_artifact_store(settings.ARTIFACT_ROOT)
+
+    if store.exists(str(project_id), model_id, current_version):
         try:
-            import joblib as _joblib
-            loaded = _joblib.load(artifact_path)
+            loaded = store.load(str(project_id), model_id, current_version)
             # Reject placeholder sentinels written at registration time
             if isinstance(loaded, dict) and loaded.get("placeholder"):
                 logger.info(
-                    f"[{model_id}] Champion artifact at '{artifact_path}' is a registration "
+                    f"[{model_id}] Champion artifact for version {current_version} is a registration "
                     "placeholder — no real model persisted yet. Falling back to metric comparison."
                 )
             elif hasattr(loaded, "predict"):
                 champion_model = loaded
                 champion_loaded_from_artifact = True
                 logger.info(
-                    f"[{model_id}] Loaded real champion artifact from '{artifact_path}'."
+                    f"[{model_id}] Loaded real champion artifact from ArtifactStore."
                 )
             else:
                 logger.warning(
-                    f"[{model_id}] Artifact at '{artifact_path}' has no predict() method "
+                    f"[{model_id}] Artifact for version {current_version} has no predict() method "
                     f"(type={type(loaded).__name__}). Falling back to metric comparison."
                 )
         except Exception as e:
             logger.warning(
-                f"[{model_id}] Could not load champion artifact from '{artifact_path}': {e}. "
+                f"[{model_id}] Could not load champion artifact for version {current_version}: {e}. "
                 "Falling back to metric comparison."
             )
     else:
