@@ -26,7 +26,7 @@ from driftguard import DriftGuard
 # Config
 # ──────────────────────────────────────────────
 API_URL    = "http://localhost:8000"
-API_KEY    = "dg-b78ddaa2f14565939175e68896671883"
+API_KEY    = "dg-1dd8dd09e3f51478b8a9ce4e41f3b477"
 MODEL_ID   = "demo-rollback-fixed"
 PROJECT_ID = 5
 
