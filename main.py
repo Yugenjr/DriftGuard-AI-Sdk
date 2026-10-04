@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DriftGuard.API")
 
 # Create database directory if using SQLite
-if settings.MLFLOW_TRACKING_URI.startswith("sqlite:///"):
+if settings.MLFLOW_TRACKING_URI and settings.MLFLOW_TRACKING_URI.startswith("sqlite:///"):
     db_file = settings.MLFLOW_TRACKING_URI.replace("sqlite:///", "")
     if db_file and "/" in db_file:
         os.makedirs(os.path.dirname(db_file), exist_ok=True)

@@ -1,29 +1,26 @@
 services:
-  # ----------------------------------------------------
-  # DATA METADATA STORE
-  # ----------------------------------------------------
+  # ====================================================
+  # BASE CONTROL PLANE (Mandatory)
+  # ====================================================
   postgres:
     image: postgres:15-alpine
     container_name: driftguard-postgres
     restart: always
     environment:
-      POSTGRES_USER: driftguard
-      POSTGRES_PASSWORD: driftguard
-      POSTGRES_DB: driftguard
+      POSTGRES_USER: ${POSTGRES_USER:-driftguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-driftguard}
+      POSTGRES_DB: ${POSTGRES_DB:-driftguard}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U driftguard -d driftguard"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-driftguard} -d ${POSTGRES_DB:-driftguard}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ----------------------------------------------------
-  # FEAST ONLINE FEATURE STORE
-  # ----------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: driftguard-redis
@@ -36,10 +33,100 @@ services:
       timeout: 5s
       retries: 5
 
-  # ----------------------------------------------------
-  # TELEMETRY MESSAGE BROKER (Kafka & Zookeeper)
-  # ----------------------------------------------------
+  driftguard-api:
+    image: yugenjr/driftguard-api:0.1.0
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        - REQUIREMENTS_FILE=requirements/prod.txt
+    container_name: driftguard-api
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-driftguard}
+      POSTGRES_USER: ${POSTGRES_USER:-driftguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-driftguard}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-}
+      PREFECT_API_URL: ${PREFECT_API_URL:-}
+      DRIFTGUARD_EVIDENTLY_URL: ${DRIFTGUARD_EVIDENTLY_URL:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  driftguard-dashboard:
+    image: yugenjr/driftguard-dashboard:0.1.0
+    build:
+      context: ../dashboard
+      dockerfile: Dockerfile
+    container_name: driftguard-dashboard
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      DRIFTGUARD_API_URL: ${DRIFTGUARD_API_URL:-http://driftguard-api:8000}
+    depends_on:
+      driftguard-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ====================================================
+  # OBSERVABILITY (Optional)
+  # ====================================================
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v2.45.0
+    container_name: driftguard-prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:10.0.0
+    container_name: driftguard-grafana
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+
+  # ====================================================
+  # MESSAGING / EVENTING (Optional)
+  # ====================================================
   zookeeper:
+    profiles: ["messaging"]
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: driftguard-zookeeper
     restart: always
@@ -55,6 +142,7 @@ services:
       retries: 5
 
   kafka:
+    profiles: ["messaging"]
     image: confluentinc/cp-kafka:7.4.0
     container_name: driftguard-kafka
     restart: always
@@ -76,10 +164,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # ----------------------------------------------------
-  # EXPERIMENT & MODEL REGISTRY (MLflow)
-  # ----------------------------------------------------
+  # ====================================================
+  # ORCHESTRATION & ML LIFECYCLE (Optional)
+  # ====================================================
   mlflow:
+    profiles: ["mlflow"]
+    image: yugenjr/driftguard-mlflow:0.1.0
     build:
       context: ..
       dockerfile: Dockerfile
@@ -87,7 +177,7 @@ services:
         - REQUIREMENTS_FILE=requirements/prod.txt
     container_name: driftguard-mlflow
     restart: always
-    command: mlflow server --backend-store-uri postgresql://driftguard:driftguard@postgres:5432/driftguard --default-artifact-root s3://driftguard-prod-artifacts-yugen/mlflow --host 0.0.0.0 --port 5000
+    command: mlflow server --backend-store-uri postgresql://${POSTGRES_USER:-driftguard}:${POSTGRES_PASSWORD:-driftguard}@postgres:5432/${POSTGRES_DB:-driftguard} --default-artifact-root ${MLFLOW_ARTIFACT_ROOT:-s3://driftguard-prod-artifacts-yugen/mlflow} --host 0.0.0.0 --port 5000
     ports:
       - "5000:5000"
     depends_on:
@@ -99,11 +189,9 @@ services:
       timeout: 5s
       retries: 3
 
-  # ----------------------------------------------------
-  # WORKFLOW SCHEDULER (Prefect Server)
-  # ----------------------------------------------------
   prefect:
-    profiles: ["full"]
+    profiles: ["orchestration"]
+    image: yugenjr/driftguard-prefect:0.1.0
     build:
       context: ..
       dockerfile: Dockerfile
@@ -116,7 +204,7 @@ services:
     ports:
       - "4200:4200"
     environment:
-      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://driftguard:driftguard@postgres:5432/prefect
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-driftguard}:${POSTGRES_PASSWORD:-driftguard}@postgres:5432/prefect
     depends_on:
       postgres:
         condition: service_healthy
@@ -126,47 +214,9 @@ services:
       timeout: 5s
       retries: 3
 
-  # ----------------------------------------------------
-  # METRICS INGESTION (Prometheus)
-  # ----------------------------------------------------
-  prometheus:
-    image: prom/prometheus:v2.45.0
-    container_name: driftguard-prometheus
-    restart: always
-    ports:
-      - "9090:9090"
-    volumes:
-      - prometheus-data:/prometheus
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-
-  # ----------------------------------------------------
-  # OBSERVABILITY PANELS (Grafana)
-  # ----------------------------------------------------
-  grafana:
-    profiles: ["full"]
-    image: grafana/grafana:10.0.0
-    container_name: driftguard-grafana
-    restart: always
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    depends_on:
-      - prometheus
-
-  # ----------------------------------------------------
-  # EVIDENTLY STATISTICAL CALCULATION SERVICE
-  # ----------------------------------------------------
   driftguard-evidently:
-    profiles: ["full"]
+    profiles: ["evidently"]
+    image: yugenjr/driftguard-evidently:0.1.0
     build:
       context: ..
       dockerfile: Dockerfile
@@ -184,59 +234,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ----------------------------------------------------
-  # DRIFTGUARD CORE API GATEWAY
-  # ----------------------------------------------------
-  driftguard-api:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-      args:
-        - REQUIREMENTS_FILE=requirements/prod.txt
-    container_name: driftguard-api
-    restart: always
-    ports:
-      - "8000:8000"
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: driftguard
-      POSTGRES_USER: driftguard
-      POSTGRES_PASSWORD: driftguard
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-      PREFECT_API_URL: http://prefect:4200/api
-      DRIFTGUARD_EVIDENTLY_URL: http://driftguard-evidently:8000
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ----------------------------------------------------
-  # DRIFTGUARD OBSIDIAN FRONTEND DASHBOARD
-  # ----------------------------------------------------
-  driftguard-dashboard:
-    profiles: ["full"]
-    image: yugenjr/driftguard-dashboard:latest
-    container_name: driftguard-dashboard
-    restart: always
-    ports:
-      - "3000:3000"
-    environment:
-      DRIFTGUARD_API_URL: http://driftguard-api:8000
-    depends_on:
-      - driftguard-api
 
 volumes:
   pgdata:

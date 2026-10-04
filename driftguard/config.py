@@ -38,7 +38,7 @@ class SDKConfig:
     ARTIFACT_ROOT = os.getenv("DRIFTGUARD_ARTIFACT_ROOT", _default_artifact_root)
 
     # MLflow settings
-    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "")
     MLFLOW_EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "driftguard")
     
     # Feast Settings

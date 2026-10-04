@@ -15,6 +15,9 @@ except ImportError:
 
 try:
     import mlflow
+    from driftguard.config import settings
+    if not settings.MLFLOW_TRACKING_URI:
+        mlflow = None
 except ImportError:
     mlflow = None
 from driftguard.config import settings
