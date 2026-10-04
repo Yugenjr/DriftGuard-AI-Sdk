@@ -370,7 +370,7 @@ def generate_governance_report(
 @flow(name="DriftGuard Retraining Flow")
 def run_retraining_flow(
     model_id: str,
-    current_accuracy: float,
+    current_accuracy: Optional[float],
     current_version: str,
     project_id: int = 1
 ) -> Dict[str, Any]:

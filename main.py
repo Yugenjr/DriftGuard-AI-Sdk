@@ -605,7 +605,7 @@ def get_project(id: int, current_user: DBUser = Depends(get_current_user), db: S
         "models": [m.model_id for m in project.models]
     }
 
-@app.post("/register", summary="Register a model for platform tracking")
+@app.post("/models/register", summary="Register a model for platform tracking")
 def register_model(req: RegisterModelRequest, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Registers a new model version for automatic tracking and concept drift monitoring.
