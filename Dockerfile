@@ -43,6 +43,7 @@ COPY serving /app/serving
 COPY monitoring /app/monitoring
 COPY governance /app/governance
 COPY feature_repo /app/feature_repo
+COPY routers /app/routers
 COPY main.py /app/main.py
 
 # Expose API/dashboard/server ports

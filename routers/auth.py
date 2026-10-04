@@ -52,3 +52,12 @@ def rotate_api_key(current_user: DBUser = Depends(get_current_user), db: Session
         "status": "rotated",
         "api_key": new_key
     }
+
+@router.get("/me", summary="Get current user profile")
+def get_user_profile(current_user: DBUser = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "name": current_user.name
+    }
+

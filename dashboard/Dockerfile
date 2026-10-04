@@ -14,6 +14,8 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+ARG DRIFTGUARD_API_URL=http://driftguard-api:8000
+ENV DRIFTGUARD_API_URL=$DRIFTGUARD_API_URL
 RUN npm run build
 
 # ==========================================

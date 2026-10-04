@@ -208,40 +208,49 @@ try:
     # 3. Create all tables (will create new dg_models and create new tables if missing)
     Base.metadata.create_all(bind=engine)
 
-    with engine.begin() as conn:
-        # 4. If we have dg_models_old, copy over the data to the newly created composite-key version
-        if has_old_table:
+    # 4. If we have dg_models_old, copy over the data to the newly created composite-key version
+    if has_old_table:
+        with engine.begin() as conn:
             print("[Migration] Copying data from dg_models_old to dg_models composite-key table...")
             try:
-                conn.execute(text("""
-                    INSERT OR IGNORE INTO dg_models (model_id, project_id, owner_id, drift_threshold, status, accuracy, version, features_json, reference_data_path, created_at)
-                    SELECT model_id, COALESCE(project_id, 1), owner_id, drift_threshold, status, accuracy, version, features_json, reference_data_path, created_at
-                    FROM dg_models_old;
+                if "sqlite" in str(engine.url):
+                    conflict_clause = "ON CONFLICT DO NOTHING"
+                else:
+                    conflict_clause = "ON CONFLICT (model_id, project_id) DO NOTHING"
+                    
+                conn.execute(text(f"""
+                    INSERT INTO dg_models (model_id, project_id, owner_id, drift_threshold, status, accuracy, version, features_json, reference_data_path, created_at)
+                    SELECT model_id, 1, owner_id, drift_threshold, status, accuracy, version, features_json, reference_data_path, created_at
+                    FROM dg_models_old
+                    {conflict_clause};
                 """))
                 conn.execute(text("DROP TABLE dg_models_old;"))
                 print("[Migration] dg_models composite key migration completed successfully.")
             except Exception as copy_err:
                 print(f"[Migration] Error completing copy from dg_models_old: {copy_err}")
 
-        # 5. Check and append project_id / last_heartbeat columns for event log tables
-        for table_name in ["dg_predictions", "dg_retraining_events", "dg_audit_logs", "dg_model_versions"]:
-            if inspector.has_table(table_name):
-                cols = [c["name"] for c in inspector.get_columns(table_name)]
-                if "project_id" not in cols:
+    # 5. Check and append project_id / last_heartbeat columns for event log tables
+    for table_name in ["dg_predictions", "dg_retraining_events", "dg_audit_logs", "dg_model_versions"]:
+        if inspector.has_table(table_name):
+            cols = [c["name"] for c in inspector.get_columns(table_name)]
+            if "project_id" not in cols:
+                with engine.begin() as conn:
                     print(f"[Migration] Adding project_id column to {table_name}...")
                     conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN project_id INTEGER DEFAULT 1;"))
 
-        # 6. Add last_heartbeat column to dg_retraining_events
-        if inspector.has_table("dg_retraining_events"):
-            cols = [c["name"] for c in inspector.get_columns("dg_retraining_events")]
-            if "last_heartbeat" not in cols:
+    # 6. Add last_heartbeat column to dg_retraining_events
+    if inspector.has_table("dg_retraining_events"):
+        cols = [c["name"] for c in inspector.get_columns("dg_retraining_events")]
+        if "last_heartbeat" not in cols:
+            with engine.begin() as conn:
                 print("[Migration] Adding last_heartbeat column to dg_retraining_events...")
                 conn.execute(text("ALTER TABLE dg_retraining_events ADD COLUMN last_heartbeat TIMESTAMP;"))
 
     # 7. Add retrain_webhook_url column to dg_models
-        if inspector.has_table("dg_models"):
-            cols = [c["name"] for c in inspector.get_columns("dg_models")]
-            if "retrain_webhook_url" not in cols:
+    if inspector.has_table("dg_models"):
+        cols = [c["name"] for c in inspector.get_columns("dg_models")]
+        if "retrain_webhook_url" not in cols:
+            with engine.begin() as conn:
                 print("[Migration] Adding retrain_webhook_url column to dg_models...")
                 conn.execute(text("ALTER TABLE dg_models ADD COLUMN retrain_webhook_url VARCHAR(500);"))
 
@@ -1287,7 +1296,7 @@ def startup_event():
 # ----------------------------------------------------
 # ROUTER REGISTRATION (Delayed to prevent circular imports)
 # ----------------------------------------------------
-from routers import auth, projects, models, telemetry, retraining, audit, evidently
+from routers import auth, projects, models, telemetry, retraining, audit, evidently, artifacts
 
 @app.get("/metrics")
 def get_metrics():
@@ -1297,6 +1306,7 @@ def get_metrics():
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(models.router)
+app.include_router(artifacts.router)
 app.include_router(telemetry.router)
 app.include_router(retraining.router)
 app.include_router(audit.router)

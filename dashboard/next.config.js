@@ -3,10 +3,11 @@ const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
   async rewrites() {
+    const backendUrl = process.env.DRIFTGUARD_API_URL || 'http://localhost:8000';
     return [
       {
         source: '/api-proxy/:path*',
-        destination: 'http://localhost:8000/:path*'
+        destination: `${backendUrl}/:path*`
       }
     ]
   },

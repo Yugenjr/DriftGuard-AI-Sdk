@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import { LayoutDashboard, Activity, Settings, LogOut, BookOpen } from 'lucide-react';
-import { getMe } from '../lib/api';
+import { LayoutDashboard, Activity, Settings, LogOut, BookOpen, ChevronDown } from 'lucide-react';
+import { getMe, createProject } from '../lib/api';
+import { useProject } from '../context/ProjectContext';
 
 export default function Sidebar({ activeModelCount }) {
   const router = useRouter();
   const [user, setUser] = useState(null);
+  const { projects, activeProject, selectProject, reloadProjects } = useProject();
+  const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
 
   useEffect(() => {
     async function loadUser() {
@@ -36,6 +39,20 @@ export default function Sidebar({ activeModelCount }) {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   };
 
+  const handleCreateProject = async () => {
+    const name = prompt("Enter new project name:");
+    if (name) {
+      try {
+        const p = await createProject(name);
+        await reloadProjects();
+        selectProject(p);
+        setIsProjectMenuOpen(false);
+      } catch (e) {
+        alert(e.message || "Failed to create project");
+      }
+    }
+  };
+
   return (
     <div className="w-[240px] bg-[#18181b] border-r border-white/10 flex flex-col justify-between h-screen sticky top-0 font-sans">
       <div>
@@ -48,8 +65,43 @@ export default function Sidebar({ activeModelCount }) {
           </div>
         </div>
 
+        {/* Project Selector */}
+        <div className="px-4 py-3 border-b border-white/10 relative">
+          <button 
+            onClick={() => setIsProjectMenuOpen(!isProjectMenuOpen)}
+            className="w-full flex items-center justify-between px-3 py-2 bg-[#09090b] rounded-lg border border-white/5 hover:border-white/10 text-xs text-[#ededed] font-medium"
+          >
+            <span className="truncate">{activeProject ? activeProject.name : 'Loading Projects...'}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-[#a1a1aa]" />
+          </button>
+          
+          {isProjectMenuOpen && (
+            <div className="absolute top-[52px] left-4 right-4 bg-[#18181b] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+              <div className="max-h-48 overflow-y-auto">
+                {projects.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => { selectProject(p); setIsProjectMenuOpen(false); }}
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-white/5 ${activeProject?.id === p.id ? 'text-[#24b47e]' : 'text-[#a1a1aa]'}`}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+              <div className="border-t border-white/10">
+                <button
+                  onClick={handleCreateProject}
+                  className="w-full text-left px-3 py-2 text-xs text-[#ededed] hover:bg-white/5 font-medium"
+                >
+                  + New Project
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Navigation Section */}
-        <nav className="mt-6 px-3 space-y-1">
+        <nav className="mt-4 px-3 space-y-1">
           {navItems.map((item, idx) => {
             const Icon = item.icon;
             const isActive = item.isActive(router.pathname);

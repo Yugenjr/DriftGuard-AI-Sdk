@@ -1,8 +1,9 @@
 import React from 'react';
 import { formatPercent, getStatusColor } from '../lib/utils';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Download } from 'lucide-react';
+import { getArtifactDownloadUrl } from '../lib/api';
 
-export default function ModelVersions({ versions, onRollback }) {
+export default function ModelVersions({ modelId, versions, onRollback }) {
   if (!versions || versions.length === 0) {
     return (
       <div className="bg-[#18181b] border border-white/10 p-5 rounded-xl text-center text-[#a1a1aa] text-sm">
@@ -26,6 +27,7 @@ export default function ModelVersions({ versions, onRollback }) {
               <th className="px-4 py-3">Version</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Accuracy</th>
+              <th className="px-4 py-3">Artifact</th>
               <th className="px-4 py-3 text-right">Action</th>
             </tr>
           </thead>
@@ -44,6 +46,12 @@ export default function ModelVersions({ versions, onRollback }) {
                   </td>
                   <td className="px-4 py-3 text-[#ededed] font-mono">
                     {v.accuracy !== null && v.accuracy !== undefined ? formatPercent(v.accuracy) : 'N/A'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <a href={getArtifactDownloadUrl(modelId, v.version)} download className="inline-flex items-center space-x-1 text-[#a1a1aa] hover:text-[#24b47e] transition-colors group" title="Download Artifact">
+                      <Download className="w-3.5 h-3.5 group-hover:-translate-y-0.5 transition-transform" />
+                      <span className="text-[10px] uppercase font-bold">.pkl</span>
+                    </a>
                   </td>
                   <td className="px-4 py-3 text-right">
                     {isArchived ? (

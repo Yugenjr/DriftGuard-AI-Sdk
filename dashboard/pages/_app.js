@@ -1,10 +1,11 @@
 import React from 'react';
 import { Toaster } from 'react-hot-toast';
 import '../styles/globals.css';
+import { ProjectProvider } from '../context/ProjectContext';
 
 export default function App({ Component, pageProps }) {
   return (
-    <>
+    <ProjectProvider>
       <Component {...pageProps} />
       <Toaster
         position="top-right"
@@ -19,6 +20,6 @@ export default function App({ Component, pageProps }) {
           },
         }}
       />
-    </>
+    </ProjectProvider>
   );
 }

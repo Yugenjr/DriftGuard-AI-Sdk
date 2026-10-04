@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getModels } from '../lib/api';
 
-export function useModels() {
+export function useModels(projectId = null) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -11,7 +11,7 @@ export function useModels() {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const data = await getModels();
+      const data = await getModels(projectId);
       if (data === null) {
         setError("Cannot connect to DriftGuard API at localhost:8000. Make sure the backend is running.");
         setModels([]);
@@ -25,7 +25,7 @@ export function useModels() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     fetchModels();

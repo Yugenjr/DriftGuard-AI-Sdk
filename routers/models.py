@@ -164,9 +164,12 @@ def delete_model(model_id: str, current_user: DBUser = Depends(get_current_user)
     return {"status": "deleted", "model_id": model_id}
 
 @router.get("/models", summary="List all monitored models")
-def list_models(current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_models(project_id: Optional[int] = None, current_user: DBUser = Depends(get_current_user), db: Session = Depends(get_db)):
     check_and_recover_all_stale_jobs_for_user(current_user.id, db)
-    models = db.query(DBModel).filter(DBModel.owner_id == current_user.id).all()
+    query = db.query(DBModel).filter(DBModel.owner_id == current_user.id)
+    if project_id is not None:
+        query = query.filter(DBModel.project_id == project_id)
+    models = query.all()
     return [{
         "model_id": m.model_id,
         "drift_threshold": m.drift_threshold,

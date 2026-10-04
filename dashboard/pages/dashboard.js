@@ -5,10 +5,12 @@ import StatCard from '../components/StatCard';
 import ModelCard from '../components/ModelCard';
 import { useModels } from '../hooks/useModels';
 import { withAuth } from '../hooks/useAuth';
+import { useProject } from '../context/ProjectContext';
 import { Terminal } from 'lucide-react';
 
 function Dashboard() {
-  const { models, loading, error, lastUpdated, refresh } = useModels();
+  const { activeProject } = useProject();
+  const { models, loading, error, lastUpdated, refresh } = useModels(activeProject?.id);
 
   // Stats calculation
   const totalModels = models ? models.length : 0;
