@@ -1,37 +1,27 @@
-import { Navigation } from "@/components/navigation";
-import { Hero } from "@/components/hero";
-import { TrustedBy } from "@/components/trusted-by";
-import { Problem } from "@/components/problem";
-import { Solution } from "@/components/solution";
-import { Features } from "@/components/features";
-import { Architecture } from "@/components/architecture";
-import { DashboardPreview } from "@/components/dashboard-preview";
-import { DeveloperExperience } from "@/components/developer-experience";
-import { Comparison } from "@/components/comparison";
-import { ProductionReadiness } from "@/components/production-readiness";
-import { UseCases } from "@/components/use-cases";
-import { Testimonials } from "@/components/testimonials";
-import { FAQ } from "@/components/faq";
-import { CTAFooter } from "@/components/cta-footer";
+import Hero from "@/components/sections/Hero";
+import TechStrip from "@/components/sections/TechStrip";
+import Problem from "@/components/sections/Problem";
+import HowItWorks from "@/components/sections/HowItWorks";
+import SDKSection from "@/components/sections/SDKSection";
+import Architecture from "@/components/sections/Architecture";
+import DashboardPreview from "@/components/sections/DashboardPreview";
+import Timeline from "@/components/sections/Timeline";
+import APISection from "@/components/sections/APISection";
+import GitHubSection from "@/components/sections/GitHubSection";
 
 export default function Home() {
   return (
-    <main>
-      <Navigation />
+    <>
       <Hero />
-      <TrustedBy />
+      <TechStrip />
       <Problem />
-      <Solution />
-      <Features />
+      <HowItWorks />
+      <SDKSection />
       <Architecture />
       <DashboardPreview />
-      <DeveloperExperience />
-      <Comparison />
-      <ProductionReadiness />
-      <UseCases />
-      <Testimonials />
-      <FAQ />
-      <CTAFooter />
-    </main>
+      <Timeline />
+      <APISection />
+      <GitHubSection />
+    </>
   );
 }
