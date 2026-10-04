@@ -3,7 +3,7 @@ import sys
 import time
 import httpx
 import subprocess
-import sqlite3
+import psycopg2
 import numpy as np
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
@@ -318,17 +318,22 @@ def main():
         print("Shutting down DriftGuard SDK tracking...")
         dg.shutdown(timeout=10.0)
         
-        # Query local SQLite database
-        db_path = os.path.join(project_root, "driftguard_metadata.db")
-        print(f"Connecting directly to database: {db_path}")
+        # Query production PostgreSQL database
+        print("Connecting directly to production PostgreSQL database...")
         
         db_pass = True
-        conn = sqlite3.connect(db_path)
         try:
+            conn = psycopg2.connect(
+                host=os.environ.get("POSTGRES_HOST", "postgres"),
+                port=os.environ.get("POSTGRES_PORT", "5432"),
+                dbname=os.environ.get("POSTGRES_DB", "driftguard"),
+                user=os.environ.get("POSTGRES_USER", "driftguard"),
+                password=os.environ.get("POSTGRES_PASSWORD", "driftguard")
+            )
             cursor = conn.cursor()
             
             # 1. Model exists
-            cursor.execute("SELECT model_id, version, status, project_id FROM dg_models WHERE model_id = ?", (model_id,))
+            cursor.execute("SELECT model_id, version, status, project_id FROM dg_models WHERE model_id = %s", (model_id,))
             model_row = cursor.fetchone()
             if model_row:
                 print(f"   - Model row exists: model_id={model_row[0]}, version={model_row[1]}, status={model_row[2]}")
@@ -337,7 +342,7 @@ def main():
                 db_pass = False
                 
             # 2. Version history exists
-            cursor.execute("SELECT version, status, accuracy FROM dg_model_versions WHERE model_id = ?", (model_id,))
+            cursor.execute("SELECT version, status, accuracy FROM dg_model_versions WHERE model_id = %s", (model_id,))
             versions = cursor.fetchall()
             print("   - Model versions history in DB:")
             for v in versions:
@@ -349,7 +354,7 @@ def main():
                 db_pass = False
                 
             # 3. Retraining history exists
-            cursor.execute("SELECT id, status, old_version, new_version FROM dg_retraining_events WHERE model_id = ?", (model_id,))
+            cursor.execute("SELECT id, status, old_version, new_version FROM dg_retraining_events WHERE model_id = %s", (model_id,))
             retrain_events = cursor.fetchall()
             print("   - Retraining history in DB:")
             for r in retrain_events:
@@ -361,7 +366,7 @@ def main():
                 db_pass = False
                 
             # 4. Audit entries exist
-            cursor.execute("SELECT event_type, model_version, triggered_by FROM dg_audit_logs WHERE model_id = ?", (model_id,))
+            cursor.execute("SELECT event_type, model_version, triggered_by FROM dg_audit_logs WHERE model_id = %s", (model_id,))
             audits = cursor.fetchall()
             print("   - Audit log entries in DB:")
             audit_types = []
@@ -383,8 +388,11 @@ def main():
                 print(f"   - [FAIL] Current version after rollback is {model_row[1] if model_row else 'None'} (Expected: 1.0.0)")
                 db_pass = False
                 
-        finally:
             conn.close()
+            
+        except psycopg2.Error as e:
+            print(f"   - [FAIL] PostgreSQL connection error: {e}")
+            db_pass = False
             
         if db_pass:
             checklist["database_verified"] = True
