@@ -1,4 +1,5 @@
 prefect==2.19.0
+pendulum==2.1.2
 griffe==0.45.0
 zenml==0.57.0
 great-expectations==0.18.15

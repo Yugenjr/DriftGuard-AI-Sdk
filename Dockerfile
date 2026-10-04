@@ -1,7 +1,8 @@
 # ==========================================
 # STAGE 1: BUILD DEPENDENCIES
 # ==========================================
-FROM python:3.11-slim AS builder
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION}-slim AS builder
 
 ARG REQUIREMENTS_FILE=requirements/api.txt
 WORKDIR /app
@@ -20,7 +21,8 @@ RUN pip install --default-timeout=1000 --no-cache-dir --user -r /app/${REQUIREME
 # ==========================================
 # STAGE 2: PRODUCTION RUNNER
 # ==========================================
-FROM python:3.11-slim AS runner
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION}-slim AS runner
 
 WORKDIR /app
 

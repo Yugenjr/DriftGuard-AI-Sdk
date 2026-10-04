@@ -51,3 +51,16 @@ To prove the end-to-end autonomous lifecycle in a cloud-native architecture with
 
 **HOW WE WILL VERIFY IT:**
 We will spin up the isolated prod stack, hit the live model with real data, trigger real drift, watch Kafka transport it, observe MLflow log the real training run, see S3 store the new model, and watch the canary use real Prometheus metrics to promote it.
+
+## Prefect Production Dependency Validation (2026-10-04)
+
+- **Root Cause:** Prefect 2.19.0 requires `pendulum <3.0`. On Python 3.11, installing `pendulum==2.1.2` triggers source builds which fail or exhaust memory on resource-constrained EC2 hosts.
+- **Python Version Selected for Prefect:** 3.10 (provides pre-built wheels for `pendulum==2.1.2`).
+- **Prefect Version:** 2.19.0 (pinned explicitly).
+- **Pendulum Version:** 2.1.2 (pinned explicitly).
+- **Successful Import Verification:** Pending (Requires execution on EC2 host, local Docker daemon unavailable).
+- **Successful Container Startup:** Pending (Requires execution on EC2 host).
+- **Healthcheck Result:** Pending (Requires execution on EC2 host).
+- **Production Validation Test Result:** Pending (Executed local `pytest tests/` successfully, but full docker test requires EC2).
+- **Date/Time of Validation:** 2026-10-04.
+- **Limitations that remain:** Local Docker daemon was unavailable. Final verification of the Prefect container startup and healthcheck must be performed directly on the target EC2 instance.

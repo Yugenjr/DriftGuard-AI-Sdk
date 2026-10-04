@@ -109,6 +109,7 @@ services:
       dockerfile: Dockerfile
       args:
         - REQUIREMENTS_FILE=requirements/pipeline.txt
+        - PYTHON_VERSION=3.10
     container_name: driftguard-prefect
     restart: always
     command: prefect server start --host 0.0.0.0 --port 4200
