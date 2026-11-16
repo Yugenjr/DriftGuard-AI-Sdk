@@ -1,5 +1,5 @@
 bentoml==1.2.0
-ray[serve]==2.10.0
+ray[serve]==2.56.0
 pydantic==1.10.13
 fastapi==0.111.0
 uvicorn==0.28.1

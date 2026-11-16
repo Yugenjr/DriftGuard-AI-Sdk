@@ -49,7 +49,7 @@ setup(
         ],
         "serving": [
             "bentoml==1.2.0",
-            "ray[serve]==2.10.0",
+            "ray[serve]==2.56.0",
         ],
         "pipeline": [
             "prefect==2.19.0",
