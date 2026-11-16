@@ -52,7 +52,7 @@ setup(
             "ray[serve]==2.10.0",
         ],
         "pipeline": [
-            "prefect==2.19.0",
+            "prefect==3.6.28.dev2",
             "zenml==0.57.0",
         ],
         "test": [
