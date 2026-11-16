@@ -56,7 +56,7 @@ setup(
             "zenml==0.57.0",
         ],
         "test": [
-            "pytest==8.2.0",
+            "pytest==9.0.3",
             "pytest-asyncio==0.23.6",
         ],
     },
