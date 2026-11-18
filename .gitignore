@@ -5,8 +5,6 @@
 # --------------------------------------------------
 # ENVIRONMENT & SECRETS
 # --------------------------------------------------
-.env
-.env.local
 .env.*.local
 *.pem
 *.key
@@ -178,7 +176,6 @@ infra/terraform/crash.log
 # IDEs & EDITORS
 # --------------------------------------------------
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -201,3 +198,5 @@ driftguard_metadata.db
 __pycache__/
 *.py[cod]
 *$py.class
+config.bat
+node_modules
