@@ -48,7 +48,7 @@ setup(
             "evidently==0.4.30",
         ],
         "serving": [
-            "bentoml==1.2.0",
+            "bentoml==1.4.39",
             "ray[serve]==2.10.0",
         ],
         "pipeline": [
